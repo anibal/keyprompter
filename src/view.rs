@@ -9,9 +9,9 @@ use gpui_kit::*;
 use crate::{
     app::{First, Last, Next, Prev},
     deck::{Block, Span, SpanStyle, parse},
-    frame::{self, Frame},
     show::{Command, Show, format_elapsed},
     stage::{ease, slot},
+    state::{self, Frame, State},
 };
 
 const COLUMN_W: f32 = 200.0;
@@ -57,19 +57,19 @@ pub struct StageView {
     show: Show,
     pos: f32,
     last_frame: Option<Instant>,
-    source: PathBuf,
+    source: Option<PathBuf>,
     mtime: Option<SystemTime>,
     error: Option<String>,
-    frame_path: Option<PathBuf>,
-    saved_frame: Option<Frame>,
+    state_path: Option<PathBuf>,
+    saved: State,
     _subscriptions: [Subscription; 2],
     _tick: Task<()>,
 }
 
 impl StageView {
     pub fn new(
-        source: PathBuf,
-        frame_path: Option<PathBuf>,
+        source: Option<PathBuf>,
+        state_path: Option<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -98,8 +98,8 @@ impl StageView {
             source,
             mtime: None,
             error: None,
-            saved_frame: frame_path.as_deref().and_then(frame::load),
-            frame_path,
+            saved: state_path.as_deref().map(state::load).unwrap_or_default(),
+            state_path,
             _subscriptions: subscriptions,
             _tick: tick,
         };
@@ -119,20 +119,32 @@ impl StageView {
         self.error.as_deref()
     }
 
+    /// Switches to another rundown, starting it from the first slide.
+    pub fn open(&mut self, source: PathBuf, cx: &mut Context<Self>) {
+        self.source = Some(source);
+        self.mtime = None;
+        self.show = Show::new(Default::default());
+        self.reload_if_changed();
+        cx.notify();
+    }
+
     fn tick(&mut self, window: &Window, cx: &mut Context<Self>) {
         self.reload_if_changed();
-        self.persist_frame(window);
+        self.persist(window);
         cx.notify();
     }
 
     fn reload_if_changed(&mut self) {
-        let loaded = fs::metadata(&self.source)
+        let Some(source) = &self.source else {
+            return;
+        };
+        let loaded = fs::metadata(source)
             .and_then(|m| m.modified())
             .and_then(|modified| {
                 if Some(modified) == self.mtime {
                     return Ok(None);
                 }
-                Ok(Some((modified, fs::read_to_string(&self.source)?)))
+                Ok(Some((modified, fs::read_to_string(source)?)))
             });
         match loaded {
             Ok(None) => {}
@@ -146,19 +158,22 @@ impl StageView {
         }
     }
 
-    fn persist_frame(&mut self, window: &Window) {
+    fn persist(&mut self, window: &Window) {
         let b = window.bounds();
-        let current = Frame {
-            x: f32::from(b.origin.x),
-            y: f32::from(b.origin.y),
-            w: f32::from(b.size.width),
-            h: f32::from(b.size.height),
+        let current = State {
+            frame: Some(Frame {
+                x: f32::from(b.origin.x),
+                y: f32::from(b.origin.y),
+                w: f32::from(b.size.width),
+                h: f32::from(b.size.height),
+            }),
+            deck: self.source.clone(),
         };
-        if self.saved_frame != Some(current)
-            && let Some(path) = &self.frame_path
-            && frame::save(path, current).is_ok()
+        if self.saved != current
+            && let Some(path) = &self.state_path
+            && state::save(path, &current).is_ok()
         {
-            self.saved_frame = Some(current);
+            self.saved = current;
         }
     }
 
@@ -288,7 +303,8 @@ impl Render for StageView {
 
         let file_name = self
             .source
-            .file_name()
+            .as_deref()
+            .and_then(|s| s.file_name())
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
         let section = self
             .show
@@ -344,13 +360,18 @@ impl Render for StageView {
             }));
 
         let empty = self.show.slides().is_empty().then(|| {
+            let hint = if self.source.is_some() {
+                "No slides yet. Add `## cue` headings to the file."
+            } else {
+                "Open a rundown with ⌘O."
+            };
             div()
                 .size_full()
                 .flex()
                 .items_center()
                 .justify_center()
                 .text_color(t.dim)
-                .child("No slides yet. Add `## cue` headings to the file.")
+                .child(hint)
         });
 
         div()

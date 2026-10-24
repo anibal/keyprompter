@@ -34,7 +34,7 @@ fn open_path(
                 ..WindowOptions::default()
             },
             cx,
-            |window, cx| cx.new(|cx| StageView::new(path, None, window, cx)),
+            |window, cx| cx.new(|cx| StageView::new(Some(path), None, window, cx)),
         )
         .unwrap()
     });
@@ -82,4 +82,17 @@ async fn missing_deck_file_surfaces_an_error_and_an_empty_show(cx: &mut TestAppC
     press(cx, handle, "right");
     assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 0);
     assert!(cx.read_entity(&view, |v, _| v.error().is_some()));
+}
+
+#[gpui_kit::test]
+async fn opening_another_deck_starts_it_from_the_top(cx: &mut TestAppContext) {
+    let (handle, view) = open(cx, "## a\n## b\n");
+    press(cx, handle, "right");
+    let other = std::env::temp_dir().join(format!("kp-ui-{}-other.md", std::process::id()));
+    std::fs::write(&other, "## x\n## y\n## z\n").unwrap();
+    cx.update(|cx| view.update(cx, |v, cx| v.open(other, cx)));
+    cx.run_until_parked();
+    assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 0);
+    press(cx, handle, "end");
+    assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 2);
 }

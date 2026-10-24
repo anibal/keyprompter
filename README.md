@@ -8,7 +8,7 @@ A cue strip for streaming. It shows "mini slides" from a Markdown file at the to
 cargo run --release --offline -- path/to/rundown.md
 ```
 
-Without an argument it opens `examples/stream.md`. Click the strip once to give it keyboard focus. Drag it to move it. The position is saved in `~/Library/Application Support/KeyPrompter/window.txt`.
+Without an argument it reopens the last rundown. Use File > Open (⌘O) to pick another one. Click the strip once to give it keyboard focus. Drag it to move it. The position and the open rundown are saved in `~/Library/Application Support/KeyPrompter/state.txt`.
 
 | Key | Action |
 |---|---|
@@ -16,6 +16,8 @@ Without an argument it opens `examples/stream.md`. Click the strip once to give 
 | ← PageUp ↑ Backspace | Previous slide |
 | Home | First slide, reset the timer |
 | End | Last slide |
+| ⌘O | Open a rundown |
+| ⌘H | Hide |
 | ⌘Q | Quit |
 
 ## Rundown format
