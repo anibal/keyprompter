@@ -1,4 +1,4 @@
-use keyprompter::snap::{Rect, settle};
+use keyprompter::snap::{Rect, overlaps, settle, top_center};
 
 const SCREEN: Rect = Rect {
     x: 0.0,
@@ -55,4 +55,35 @@ fn a_strip_away_from_every_edge_stays_put() {
 #[test]
 fn a_strip_already_on_an_edge_does_not_move_again() {
     assert_eq!(settle(strip(0.0, 899.0), SCREEN, VISIBLE, 24.0), None);
+}
+
+#[test]
+fn moving_to_the_top_centers_the_strip_over_the_menu_bar() {
+    let laptop = Rect {
+        x: 1920.0,
+        y: 0.0,
+        w: 1512.0,
+        h: 982.0,
+    };
+    assert_eq!(
+        top_center(strip(10.0, 300.0), laptop),
+        Rect {
+            x: 2076.0,
+            y: 832.0,
+            w: 1200.0,
+            h: 150.0
+        }
+    );
+    let wide = Rect {
+        w: 3000.0,
+        ..strip(0.0, 0.0)
+    };
+    assert_eq!(top_center(wide, laptop).w, 1512.0);
+}
+
+#[test]
+fn a_frame_off_every_screen_does_not_overlap() {
+    assert!(overlaps(strip(300.0, 900.0), SCREEN));
+    assert!(!overlaps(strip(5000.0, 900.0), SCREEN));
+    assert!(!overlaps(strip(-1200.0, 900.0), SCREEN));
 }

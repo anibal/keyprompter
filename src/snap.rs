@@ -37,3 +37,19 @@ fn nearest(pos: f32, len: f32, starts: [f32; 2], ends: [f32; 2], reach: f32) -> 
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map_or(pos, |(candidate, _)| candidate)
 }
+
+/// `win` centered on the top edge of `screen` and no wider than it, in a
+/// y-up space such as AppKit's.
+pub fn top_center(win: Rect, screen: Rect) -> Rect {
+    let w = win.w.min(screen.w);
+    Rect {
+        x: screen.x + (screen.w - w) / 2.0,
+        y: screen.y + screen.h - win.h,
+        w,
+        h: win.h,
+    }
+}
+
+pub fn overlaps(a: Rect, b: Rect) -> bool {
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+}

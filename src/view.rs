@@ -78,6 +78,7 @@ impl StageView {
         cx: &mut Context<Self>,
     ) -> Self {
         platform::hide_from_capture(window, saved.capture == Capture::Hidden);
+        platform::allow_over_menu_bar(window);
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         let subscriptions = [
@@ -112,7 +113,14 @@ impl StageView {
             _tick: tick,
         };
         view.reload_if_changed();
-        view.moved(window, cx);
+        // macOS pulls a window under the menu bar when it first shows it, so
+        // the saved frame goes back on once it is on screen.
+        cx.on_next_frame(window, |this, window, cx| {
+            if let Some(frame) = this.saved.frame {
+                platform::restore(window, frame);
+            }
+            this.moved(window, cx);
+        });
         view
     }
 

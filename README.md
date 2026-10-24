@@ -8,7 +8,7 @@ A cue strip for streaming. It shows "mini slides" from a Markdown file at the to
 cargo run --release --offline -- path/to/rundown.md
 ```
 
-Without an argument it reopens the last rundown. Use File > Open (⌘O) to pick another one. Click the strip once to give it keyboard focus. Drag it to move it. Let go near a screen edge or the menu bar and it snaps flush. The position and the open rundown are saved in `~/Library/Application Support/KeyPrompter/state.txt`.
+Without an argument it reopens the last rundown. Use File > Open (⌘O) to pick another one. Click the strip once to give it keyboard focus. Drag it to move it. Let go near a screen edge or the menu bar and it snaps flush. View > Move to Top of Screen puts it over the menu bar, closest to the webcam, and View > Move to Display sends it to the top of another screen. If its saved screen is gone at launch, it opens at the top of the main screen. The position and the open rundown are saved in `~/Library/Application Support/KeyPrompter/state.txt`.
 
 | Key | Action |
 |---|---|
@@ -17,6 +17,7 @@ Without an argument it reopens the last rundown. Use File > Open (⌘O) to pick 
 | Home | First slide, reset the timer |
 | End | Last slide |
 | ⌃⌥→ / ⌃⌥← | Next / previous slide from any app, no focus needed |
+| ⌥⌘↑ | Move the strip to the very top of its screen, over the menu bar |
 | ⌘O | Open a rundown |
 | ⌘H | Hide |
 | ⌘Q | Quit |

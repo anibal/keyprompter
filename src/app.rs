@@ -1,8 +1,8 @@
 use gpui_kit::*;
 
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
-use crate::{show::Command, state::Capture, view::StageView};
+use crate::{platform, show::Command, state::Capture, view::StageView};
 
 actions!(
     keyprompter,
@@ -13,12 +13,20 @@ actions!(
         Last,
         Open,
         ToggleCapture,
+        MoveToTop,
         Quit,
         Hide,
         HideOthers,
         ShowAll
     ]
 );
+
+/// Moves the strip to the top of the `index`-th screen, as `NSScreen` lists them.
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = keyprompter, no_json)]
+pub struct MoveToDisplay {
+    pub index: usize,
+}
 
 /// The first binding of each action is the one its menu item shows.
 pub fn key_bindings() -> Vec<KeyBinding> {
@@ -34,13 +42,14 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("home", First, None),
         KeyBinding::new("end", Last, None),
         KeyBinding::new("cmd-o", Open, None),
+        KeyBinding::new("alt-cmd-up", MoveToTop, None),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-h", Hide, None),
         KeyBinding::new("alt-cmd-h", HideOthers, None),
     ]
 }
 
-pub fn menus(capture: Capture) -> Vec<Menu> {
+pub fn menus(capture: Capture, screens: &[String]) -> Vec<Menu> {
     vec![
         Menu {
             name: "KeyPrompter".into(),
@@ -63,6 +72,19 @@ pub fn menus(capture: Capture) -> Vec<Menu> {
             items: vec![
                 MenuItem::action("Hide from Screen Capture", ToggleCapture)
                     .checked(capture == Capture::Hidden),
+                MenuItem::separator(),
+                MenuItem::action("Move to Top of Screen", MoveToTop),
+                MenuItem::submenu(Menu {
+                    name: "Move to Display".into(),
+                    items: screens
+                        .iter()
+                        .enumerate()
+                        .map(|(index, name)| {
+                            MenuItem::action(name.clone(), MoveToDisplay { index })
+                        })
+                        .collect(),
+                    disabled: screens.is_empty(),
+                }),
             ],
             disabled: false,
         },
@@ -87,7 +109,7 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
-    cx.set_menus(menus(Capture::default()));
+    cx.set_menus(menus(Capture::default(), &[]));
 }
 
 /// Routes the strip's actions to its view. They must be global listeners:
@@ -111,8 +133,20 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, cx: &mut App) {
                     view.update(cx, |v, _| v.toggle_capture(window))
                 })
                 .ok();
-            cx.set_menus(menus(view.read(cx).capture()));
+            refresh_menus(&view, cx);
         }
+    });
+    cx.on_action(move |_: &MoveToTop, cx| {
+        window
+            .update(cx, |_, window, _| platform::move_to_top(window, None))
+            .ok();
+    });
+    cx.on_action(move |action: &MoveToDisplay, cx| {
+        window
+            .update(cx, |_, window, _| {
+                platform::move_to_top(window, Some(action.index))
+            })
+            .ok();
     });
     cx.on_action({
         let view = view.clone();
@@ -134,7 +168,24 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, cx: &mut App) {
             .detach();
         }
     });
-    cx.set_menus(menus(view.read(cx).capture()));
+    refresh_menus(&view, cx);
+    cx.spawn(async move |cx| {
+        let mut shown = platform::screen_names();
+        loop {
+            cx.background_executor().timer(Duration::from_secs(2)).await;
+            let now = platform::screen_names();
+            if now != shown {
+                shown = now;
+                cx.update(|cx| refresh_menus(&view, cx));
+            }
+        }
+    })
+    .detach();
+}
+
+/// Rebuilds the menu bar from the capture setting and the connected screens.
+fn refresh_menus(view: &Entity<StageView>, cx: &mut App) {
+    cx.set_menus(menus(view.read(cx).capture(), &platform::screen_names()));
 }
 
 pub fn open(window: AnyWindowHandle, view: &Entity<StageView>, path: PathBuf, cx: &mut App) {
