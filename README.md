@@ -8,7 +8,7 @@ A cue strip for streaming. It shows "mini slides" from a Markdown file at the to
 cargo run --release --offline -- path/to/rundown.md
 ```
 
-Without an argument it reopens the last rundown. Use File > Open (⌘O) to pick another one. Click the strip once to give it keyboard focus. Drag it to move it. The position and the open rundown are saved in `~/Library/Application Support/KeyPrompter/state.txt`.
+Without an argument it reopens the last rundown. Use File > Open (⌘O) to pick another one. Click the strip once to give it keyboard focus. Drag it to move it. Let go near a screen edge or the menu bar and it snaps flush. The position and the open rundown are saved in `~/Library/Application Support/KeyPrompter/state.txt`.
 
 | Key | Action |
 |---|---|
@@ -26,6 +26,8 @@ To build `target/release/KeyPrompter.app` (ad-hoc signed, opens `.md` files from
 ```sh
 scripts/bundle.sh
 ```
+
+The icon in `assets/AppIcon.icns` comes from `swift scripts/icon.swift assets/AppIcon.icns`.
 
 The strip is hidden from screenshots, screen sharing and recordings by default. View > Hide from Screen Capture turns that off. With Reduce Motion on in System Settings, slides change without the slide animation.
 

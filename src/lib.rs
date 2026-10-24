@@ -3,6 +3,7 @@ pub mod deck;
 pub mod hotkeys;
 pub mod platform;
 pub mod show;
+pub mod snap;
 pub mod stage;
 pub mod state;
 pub mod view;

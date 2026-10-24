@@ -17,6 +17,7 @@ use crate::{
 const COLUMN_W: f32 = 200.0;
 const MAX_CARD_W: f32 = 420.0;
 const CARD_VPAD: f32 = 12.0;
+const SNAP_REACH: f32 = 24.0;
 
 struct Theme {
     bg: Hsla,
@@ -63,7 +64,8 @@ pub struct StageView {
     state_path: Option<PathBuf>,
     saved: State,
     capture: Capture,
-    _subscriptions: [Subscription; 2],
+    settling: Option<Task<()>>,
+    _subscriptions: [Subscription; 3],
     _tick: Task<()>,
 }
 
@@ -81,6 +83,7 @@ impl StageView {
         let subscriptions = [
             cx.observe_window_activation(window, |this, window, cx| window.focus(&this.focus, cx)),
             cx.observe_window_appearance(window, |_, _, cx| cx.notify()),
+            cx.observe_window_bounds(window, |this, window, cx| this.moved(window, cx)),
         ];
         let tick = cx.spawn_in(window, async move |this, cx| {
             loop {
@@ -104,10 +107,12 @@ impl StageView {
             capture: saved.capture,
             saved,
             state_path,
+            settling: None,
             _subscriptions: subscriptions,
             _tick: tick,
         };
         view.reload_if_changed();
+        view.moved(window, cx);
         view
     }
 
@@ -150,6 +155,27 @@ impl StageView {
         self.reload_if_changed();
         self.persist(window);
         cx.notify();
+    }
+
+    /// Once any drag ends, snaps onto nearby edges and saves the frame. Also
+    /// runs at launch, so a restored frame settles the same way.
+    fn moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settling.is_some() {
+            return;
+        }
+        self.settling = Some(cx.spawn_in(window, async move |this, cx| {
+            while platform::mouse_down() {
+                cx.background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
+            }
+            this.update_in(cx, |this, window, _| {
+                this.settling = None;
+                platform::snap_to_edges(window, SNAP_REACH);
+                this.persist(window);
+            })
+            .ok();
+        }));
     }
 
     fn reload_if_changed(&mut self) {
@@ -334,11 +360,8 @@ impl Render for StageView {
             .current()
             .and_then(|s| s.section.clone())
             .unwrap_or_default();
-        let position = format!(
-            "{} / {}",
-            (self.show.cursor() + 1).min(self.show.slides().len()),
-            self.show.slides().len()
-        );
+        let position = (!self.show.slides().is_empty())
+            .then(|| format!("{} / {}", self.show.cursor() + 1, self.show.slides().len()));
         let column = div()
             .w(px(COLUMN_W))
             .h_full()
@@ -357,7 +380,7 @@ impl Render for StageView {
                     .truncate()
                     .child(section),
             )
-            .child(div().text_size(px(13.0)).child(position))
+            .children(position.map(|p| div().text_size(px(13.0)).child(p)))
             .child(
                 div()
                     .flex()
