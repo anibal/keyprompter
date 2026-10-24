@@ -74,3 +74,11 @@ impl Show {
         }
     }
 }
+
+/// `mm:ss`, or `--:--` before the first advance.
+pub fn format_elapsed(elapsed: Option<Duration>) -> String {
+    match elapsed {
+        None => "--:--".into(),
+        Some(d) => format!("{:02}:{:02}", d.as_secs() / 60, d.as_secs() % 60),
+    }
+}

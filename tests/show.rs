@@ -74,3 +74,14 @@ fn empty_deck_is_legal() {
     s.apply(Command::Last, Instant::now());
     assert_eq!(s.cursor(), 0);
 }
+
+#[test]
+fn elapsed_formats_as_minutes_and_seconds() {
+    use keyprompter::show::format_elapsed;
+    assert_eq!(format_elapsed(None), "--:--");
+    assert_eq!(format_elapsed(Some(Duration::from_secs(65))), "01:05");
+    assert_eq!(
+        format_elapsed(Some(Duration::from_secs(61 * 60 + 9))),
+        "61:09"
+    );
+}
