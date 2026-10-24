@@ -8,7 +8,7 @@
   - [x] Shared mutable state: n/a: single delegate, single worktree.
   - [x] Smallest safe decomposition: one sonnet delegate owns the whole crate; parser and layout are pure and tested, shell is thin.
 - [x] 4. Delegate code-writing to a subagent (sonnet, own worktree). merged e345a8d, fd822a3
-- [ ] 5. Verify on the matching surface. Real window at layer 101 survives Finder activation; headless key test passes; real click+Space and visuals pending user check (no Screen Recording or Accessibility permission).
+- [x] 5. Verify on the matching surface. Real window survives Finder activation (measured); user confirmed click + Space and visuals on the real display.
 - [x] 6. Rebase into small, ordered commits. already ordered: scaffold, domain core, view.
 - [x] 7. If the design is contested, `interrogate` before shipping. skip unless review finds a contested call.
 - [ ] 8. Run **Opening a PR**. skip: no remote; local repo PoC.
