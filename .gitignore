@@ -1,0 +1,5 @@
+/target/
+/.cargo-local/
+/.rustup-local/
+*.sqlite3
+*.sqlite3-journal
