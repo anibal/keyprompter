@@ -20,6 +20,12 @@ Without an argument it reopens the last rundown. Use File > Open (⌘O) to pick 
 | ⌘H | Hide |
 | ⌘Q | Quit |
 
+To build `target/release/KeyPrompter.app` (ad-hoc signed, opens `.md` files from Finder's Open With):
+
+```sh
+scripts/bundle.sh
+```
+
 ## Rundown format
 
 ```markdown
