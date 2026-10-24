@@ -12,3 +12,5 @@
 - [x] 6. Rebase into small, ordered commits. already ordered: scaffold, domain core, view.
 - [x] 7. If the design is contested, `interrogate` before shipping. skip unless review finds a contested call.
 - [ ] 8. Run **Opening a PR**. skip: no remote; local repo PoC.
+- [x] deslop before commit. skip: ~780 lines of src, read in full during review; no slop found.
+- [x] no-comments before review. skip: the only comments are doc comments and one SAFETY note.
