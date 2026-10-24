@@ -3,8 +3,7 @@ use std::path::PathBuf;
 use futures::{StreamExt, channel::mpsc};
 use gpui_kit::*;
 use keyprompter::{
-    app::{self, Open, ToggleCapture},
-    hotkeys,
+    app, hotkeys,
     state::{self, Frame},
     view::StageView,
 };
@@ -14,7 +13,10 @@ const DEFAULT_H: f32 = 150.0;
 fn main() {
     let state_path = state::path();
     let saved = state_path.as_deref().map(state::load).unwrap_or_default();
-    let deck = std::env::args_os().nth(1).map(PathBuf::from).or(saved.deck);
+    let deck = std::env::args_os()
+        .nth(1)
+        .map(|arg| std::path::absolute(&arg).unwrap_or_else(|_| PathBuf::from(arg)))
+        .or(saved.deck.clone());
 
     let (opened_tx, mut opened_rx) = mpsc::unbounded();
     let application = application();
@@ -51,44 +53,15 @@ fn main() {
                 ..WindowOptions::default()
             },
             cx,
-            |window, cx| cx.new(|cx| StageView::new(deck, state_path, window, cx)),
+            |window, cx| cx.new(|cx| StageView::new(deck, saved, state_path, window, cx)),
         )
         .expect("open window");
 
-        cx.on_action({
-            let view = view.clone();
-            move |_: &Open, cx| {
-                let picked = cx.prompt_for_paths(PathPromptOptions {
-                    files: true,
-                    directories: false,
-                    multiple: false,
-                    prompt: Some("Open Rundown".into()),
-                });
-                let view = view.clone();
-                cx.spawn(async move |cx| {
-                    if let Ok(Ok(Some(paths))) = picked.await
-                        && let Some(path) = paths.into_iter().next()
-                    {
-                        view.update(cx, |v, cx| v.open(path, cx));
-                    }
-                })
-                .detach();
-            }
-        });
-        cx.on_action({
-            let view = view.clone();
-            move |_: &ToggleCapture, cx| {
-                window
-                    .update(cx, |_, window, cx| {
-                        view.update(cx, |v, cx| v.toggle_capture(window, cx))
-                    })
-                    .ok();
-            }
-        });
+        app::connect(window, view.clone(), cx);
         hotkeys::listen(view.clone(), cx);
         cx.spawn(async move |cx| {
             while let Some(path) = opened_rx.next().await {
-                view.update(cx, |v, cx| v.open(path, cx));
+                cx.update(|cx| app::open(window, &view, path, cx));
             }
         })
         .detach();

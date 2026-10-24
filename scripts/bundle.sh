@@ -31,7 +31,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
       <key>CFBundleTypeRole</key><string>Viewer</string>
       <key>LSHandlerRank</key><string>Alternate</string>
       <key>LSItemContentTypes</key>
-      <array><string>net.daringfireball.markdown</string><string>public.plain-text</string></array>
+      <array><string>net.daringfireball.markdown</string></array>
     </dict>
   </array>
 </dict>

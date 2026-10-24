@@ -7,7 +7,6 @@ use std::{
 use gpui_kit::*;
 
 use crate::{
-    app::{self, First, Last, Next, Prev},
     deck::{Block, Span, SpanStyle, parse},
     platform,
     show::{Command, Show, format_elapsed},
@@ -71,13 +70,12 @@ pub struct StageView {
 impl StageView {
     pub fn new(
         source: Option<PathBuf>,
+        saved: State,
         state_path: Option<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let saved = state_path.as_deref().map(state::load).unwrap_or_default();
         platform::hide_from_capture(window, saved.capture == Capture::Hidden);
-        cx.set_menus(app::menus(saved.capture));
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         let subscriptions = [
@@ -129,22 +127,22 @@ impl StageView {
         self.capture
     }
 
-    pub fn toggle_capture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn toggle_capture(&mut self, window: &Window) {
         self.capture = match self.capture {
             Capture::Hidden => Capture::Shown,
             Capture::Shown => Capture::Hidden,
         };
         platform::hide_from_capture(window, self.capture == Capture::Hidden);
-        cx.set_menus(app::menus(self.capture));
         self.persist(window);
     }
 
     /// Switches to another rundown, starting it from the first slide.
-    pub fn open(&mut self, source: PathBuf, cx: &mut Context<Self>) {
+    pub fn open(&mut self, source: PathBuf, window: &Window, cx: &mut Context<Self>) {
         self.source = Some(source);
         self.mtime = None;
         self.show = Show::new(Default::default());
         self.reload_if_changed();
+        self.persist(window);
         cx.notify();
     }
 
@@ -248,7 +246,7 @@ fn rich(spans: &[Span], color: Hsla, code_bg: Hsla, window: &Window) -> StyledTe
 }
 
 impl Render for StageView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let now = Instant::now();
         let target = self.show.cursor() as f32;
         let dt = self
@@ -402,10 +400,6 @@ impl Render for StageView {
         div()
             .id("root")
             .track_focus(&self.focus)
-            .on_action(cx.listener(|this, _: &Next, _, cx| this.command(Command::Next, cx)))
-            .on_action(cx.listener(|this, _: &Prev, _, cx| this.command(Command::Prev, cx)))
-            .on_action(cx.listener(|this, _: &First, _, cx| this.command(Command::First, cx)))
-            .on_action(cx.listener(|this, _: &Last, _, cx| this.command(Command::Last, cx)))
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
             .size_full()
             .flex()

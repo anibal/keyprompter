@@ -5,7 +5,10 @@ use gpui_kit::{
     AnyWindowHandle, AppContext, Bounds, Entity, TestAppContext, WindowBounds, WindowOptions, px,
     size,
 };
-use keyprompter::{state::Capture, view::StageView};
+use keyprompter::{
+    state::{Capture, State},
+    view::StageView,
+};
 
 fn open(cx: &mut TestAppContext, deck: &str) -> (AnyWindowHandle, Entity<StageView>) {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -34,10 +37,13 @@ fn open_path(
                 ..WindowOptions::default()
             },
             cx,
-            |window, cx| cx.new(|cx| StageView::new(Some(path), None, window, cx)),
+            |window, cx| {
+                cx.new(|cx| StageView::new(Some(path), State::default(), None, window, cx))
+            },
         )
         .unwrap()
     });
+    cx.update(|cx| keyprompter::app::connect(opened.0, opened.1.clone(), cx));
     cx.run_until_parked();
     opened
 }
@@ -90,7 +96,7 @@ async fn opening_another_deck_starts_it_from_the_top(cx: &mut TestAppContext) {
     press(cx, handle, "right");
     let other = std::env::temp_dir().join(format!("kp-ui-{}-other.md", std::process::id()));
     std::fs::write(&other, "## x\n## y\n## z\n").unwrap();
-    cx.update(|cx| view.update(cx, |v, cx| v.open(other, cx)));
+    cx.update(|cx| keyprompter::app::open(handle, &view, other, cx));
     cx.run_until_parked();
     assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 0);
     press(cx, handle, "end");
@@ -104,7 +110,7 @@ async fn the_capture_toggle_flips_between_hidden_and_shown(cx: &mut TestAppConte
     assert_eq!(capture(cx), Capture::Hidden);
     let toggle = |cx: &mut TestAppContext| {
         cx.update_window(handle, |_, window, cx| {
-            view.update(cx, |v, cx| v.toggle_capture(window, cx))
+            view.update(cx, |v, _| v.toggle_capture(window))
         })
         .unwrap()
     };
@@ -112,4 +118,12 @@ async fn the_capture_toggle_flips_between_hidden_and_shown(cx: &mut TestAppConte
     assert_eq!(capture(cx), Capture::Shown);
     toggle(cx);
     assert_eq!(capture(cx), Capture::Hidden);
+}
+
+#[gpui_kit::test]
+async fn app_level_actions_reach_the_strip(cx: &mut TestAppContext) {
+    let (_, view) = open(cx, "## a\n## b\n## c\n");
+    cx.update(|cx| cx.dispatch_action(&keyprompter::app::Last));
+    cx.run_until_parked();
+    assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 2);
 }
