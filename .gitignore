@@ -3,4 +3,3 @@
 /.rustup-local/
 *.sqlite3
 *.sqlite3-journal
-/.audit/
