@@ -167,7 +167,7 @@ impl StageView {
 
     /// Once any drag ends, snaps onto nearby edges and saves the frame. Also
     /// runs at launch, so a restored frame settles the same way.
-    fn moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.settling.is_some() {
             return;
         }
@@ -212,13 +212,14 @@ impl StageView {
 
     fn persist(&mut self, window: &Window) {
         let b = window.bounds();
+        let frame = platform::frame(window).unwrap_or(Frame {
+            x: f32::from(b.origin.x),
+            y: f32::from(b.origin.y),
+            w: f32::from(b.size.width),
+            h: f32::from(b.size.height),
+        });
         let current = State {
-            frame: Some(Frame {
-                x: f32::from(b.origin.x),
-                y: f32::from(b.origin.y),
-                w: f32::from(b.size.width),
-                h: f32::from(b.size.height),
-            }),
+            frame: Some(frame),
             deck: self.source.clone(),
             capture: self.capture,
         };

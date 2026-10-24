@@ -136,18 +136,24 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, cx: &mut App) {
             refresh_menus(&view, cx);
         }
     });
-    cx.on_action(move |_: &MoveToTop, cx| {
-        window
-            .update(cx, |_, window, _| platform::move_to_top(window, None))
-            .ok();
+    // GPUI drops the move notification while the window is borrowed here, so
+    // settle and save by hand.
+    let move_to_top = {
+        let view = view.clone();
+        move |screen: Option<usize>, cx: &mut App| {
+            window
+                .update(cx, |_, window, cx| {
+                    platform::move_to_top(window, screen);
+                    view.update(cx, |v, cx| v.moved(window, cx));
+                })
+                .ok();
+        }
+    };
+    cx.on_action({
+        let move_to_top = move_to_top.clone();
+        move |_: &MoveToTop, cx| move_to_top(None, cx)
     });
-    cx.on_action(move |action: &MoveToDisplay, cx| {
-        window
-            .update(cx, |_, window, _| {
-                platform::move_to_top(window, Some(action.index))
-            })
-            .ok();
-    });
+    cx.on_action(move |action: &MoveToDisplay, cx| move_to_top(Some(action.index), cx));
     cx.on_action({
         let view = view.clone();
         move |_: &Open, cx| {

@@ -66,12 +66,17 @@ pub fn allow_over_menu_bar(window: &Window) {
                 unconstrained
                     as extern "C-unwind" fn(&AnyObject, Sel, NSRect, *mut AnyObject) -> NSRect,
             );
-            class_addMethod(
+            let added = class_addMethod(
                 class.cast_mut(),
                 sel!(constrainFrameRect:toScreen:),
                 imp,
                 c"{CGRect={CGPoint=dd}{CGSize=dd}}@:{CGRect={CGPoint=dd}{CGSize=dd}}@".as_ptr(),
             );
+            if !added.as_bool() {
+                eprintln!(
+                    "GPUI's panel already constrains frames; the strip stays below the menu bar"
+                );
+            }
         }
     });
 }
@@ -142,7 +147,7 @@ pub fn move_to_top(window: &Window, screen: Option<usize>) {
     };
     let screen = match screen {
         Some(i) => screens().into_iter().nth(i),
-        None => ns_window.screen(),
+        None => ns_window.screen().or_else(|| screens().into_iter().next()),
     };
     if let Some(screen) = screen {
         let placed = snap::top_center(rect(ns_window.frame()), rect(screen.frame()));
@@ -150,7 +155,22 @@ pub fn move_to_top(window: &Window, screen: Option<usize>) {
     }
 }
 
-/// Puts the window back at a saved frame, given in GPUI's top-left space.
+/// The window's frame in one space shared by every screen: top-left origin at
+/// the main screen's top-left corner, y down. GPUI's own bounds are relative
+/// to the window's current screen, which can't say which screen that is.
+pub fn frame(window: &Window) -> Option<Frame> {
+    let ns_window = ns_window(window)?;
+    let main = rect(screens().first()?.frame());
+    let f = rect(ns_window.frame());
+    Some(Frame {
+        x: f.x,
+        y: main.h - f.y - f.h,
+        w: f.w,
+        h: f.h,
+    })
+}
+
+/// Puts the window back at a frame from [`frame`].
 /// A frame on no connected screen lands at the top of the main screen.
 pub fn restore(window: &Window, frame: Frame) {
     let Some(ns_window) = ns_window(window) else {
