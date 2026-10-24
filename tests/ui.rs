@@ -5,7 +5,7 @@ use gpui_kit::{
     AnyWindowHandle, AppContext, Bounds, Entity, TestAppContext, WindowBounds, WindowOptions, px,
     size,
 };
-use keyprompter::view::StageView;
+use keyprompter::{state::Capture, view::StageView};
 
 fn open(cx: &mut TestAppContext, deck: &str) -> (AnyWindowHandle, Entity<StageView>) {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -95,4 +95,21 @@ async fn opening_another_deck_starts_it_from_the_top(cx: &mut TestAppContext) {
     assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 0);
     press(cx, handle, "end");
     assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 2);
+}
+
+#[gpui_kit::test]
+async fn the_capture_toggle_flips_between_hidden_and_shown(cx: &mut TestAppContext) {
+    let (handle, view) = open(cx, "## a\n");
+    let capture = |cx: &mut TestAppContext| cx.read_entity(&view, |v, _| v.capture());
+    assert_eq!(capture(cx), Capture::Hidden);
+    let toggle = |cx: &mut TestAppContext| {
+        cx.update_window(handle, |_, window, cx| {
+            view.update(cx, |v, cx| v.toggle_capture(window, cx))
+        })
+        .unwrap()
+    };
+    toggle(cx);
+    assert_eq!(capture(cx), Capture::Shown);
+    toggle(cx);
+    assert_eq!(capture(cx), Capture::Hidden);
 }

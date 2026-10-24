@@ -1,9 +1,20 @@
 use gpui_kit::*;
 
+use crate::state::Capture;
+
 actions!(
     keyprompter,
     [
-        Next, Prev, First, Last, Open, Quit, Hide, HideOthers, ShowAll
+        Next,
+        Prev,
+        First,
+        Last,
+        Open,
+        ToggleCapture,
+        Quit,
+        Hide,
+        HideOthers,
+        ShowAll
     ]
 );
 
@@ -27,7 +38,7 @@ pub fn key_bindings() -> Vec<KeyBinding> {
     ]
 }
 
-pub fn menus() -> Vec<Menu> {
+pub fn menus(capture: Capture) -> Vec<Menu> {
     vec![
         Menu {
             name: "KeyPrompter".into(),
@@ -43,6 +54,14 @@ pub fn menus() -> Vec<Menu> {
         Menu {
             name: "File".into(),
             items: vec![MenuItem::action("Open…", Open)],
+            disabled: false,
+        },
+        Menu {
+            name: "View".into(),
+            items: vec![
+                MenuItem::action("Hide from Screen Capture", ToggleCapture)
+                    .checked(capture == Capture::Hidden),
+            ],
             disabled: false,
         },
         Menu {
@@ -66,5 +85,5 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
-    cx.set_menus(menus());
+    cx.set_menus(menus(Capture::default()));
 }

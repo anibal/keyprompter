@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use futures::{StreamExt, channel::mpsc};
 use gpui_kit::*;
 use keyprompter::{
-    app::{self, Open},
+    app::{self, Open, ToggleCapture},
+    hotkeys,
     state::{self, Frame},
     view::StageView,
 };
@@ -37,7 +38,7 @@ fn main() {
                 .map_or(1440.0, |d| f32::from(d.bounds().size.width)),
             h: DEFAULT_H,
         });
-        let (_, view) = open_window(
+        let (window, view) = open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds {
                     origin: point(px(frame.x), px(frame.y)),
@@ -74,6 +75,17 @@ fn main() {
                 .detach();
             }
         });
+        cx.on_action({
+            let view = view.clone();
+            move |_: &ToggleCapture, cx| {
+                window
+                    .update(cx, |_, window, cx| {
+                        view.update(cx, |v, cx| v.toggle_capture(window, cx))
+                    })
+                    .ok();
+            }
+        });
+        hotkeys::listen(view.clone(), cx);
         cx.spawn(async move |cx| {
             while let Some(path) = opened_rx.next().await {
                 view.update(cx, |v, cx| v.open(path, cx));

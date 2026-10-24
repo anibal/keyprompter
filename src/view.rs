@@ -7,11 +7,12 @@ use std::{
 use gpui_kit::*;
 
 use crate::{
-    app::{First, Last, Next, Prev},
+    app::{self, First, Last, Next, Prev},
     deck::{Block, Span, SpanStyle, parse},
+    platform,
     show::{Command, Show, format_elapsed},
     stage::{ease, slot},
-    state::{self, Frame, State},
+    state::{self, Capture, Frame, State},
 };
 
 const COLUMN_W: f32 = 200.0;
@@ -62,6 +63,7 @@ pub struct StageView {
     error: Option<String>,
     state_path: Option<PathBuf>,
     saved: State,
+    capture: Capture,
     _subscriptions: [Subscription; 2],
     _tick: Task<()>,
 }
@@ -73,6 +75,9 @@ impl StageView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let saved = state_path.as_deref().map(state::load).unwrap_or_default();
+        platform::hide_from_capture(window, saved.capture == Capture::Hidden);
+        cx.set_menus(app::menus(saved.capture));
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         let subscriptions = [
@@ -98,7 +103,8 @@ impl StageView {
             source,
             mtime: None,
             error: None,
-            saved: state_path.as_deref().map(state::load).unwrap_or_default(),
+            capture: saved.capture,
+            saved,
             state_path,
             _subscriptions: subscriptions,
             _tick: tick,
@@ -117,6 +123,20 @@ impl StageView {
 
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
+    }
+
+    pub fn capture(&self) -> Capture {
+        self.capture
+    }
+
+    pub fn toggle_capture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.capture = match self.capture {
+            Capture::Hidden => Capture::Shown,
+            Capture::Shown => Capture::Hidden,
+        };
+        platform::hide_from_capture(window, self.capture == Capture::Hidden);
+        cx.set_menus(app::menus(self.capture));
+        self.persist(window);
     }
 
     /// Switches to another rundown, starting it from the first slide.
@@ -168,6 +188,7 @@ impl StageView {
                 h: f32::from(b.size.height),
             }),
             deck: self.source.clone(),
+            capture: self.capture,
         };
         if self.saved != current
             && let Some(path) = &self.state_path
@@ -177,7 +198,7 @@ impl StageView {
         }
     }
 
-    fn command(&mut self, cmd: Command, cx: &mut Context<Self>) {
+    pub fn command(&mut self, cmd: Command, cx: &mut Context<Self>) {
         self.show.apply(cmd, Instant::now());
         cx.notify();
     }
@@ -233,7 +254,11 @@ impl Render for StageView {
         let dt = self
             .last_frame
             .map_or(0.0, |t| (now - t).as_secs_f32().min(0.05));
-        self.pos = ease(self.pos, target, dt);
+        self.pos = if platform::reduce_motion() {
+            target
+        } else {
+            ease(self.pos, target, dt)
+        };
         self.last_frame = (self.pos != target).then_some(now);
         if self.pos != target {
             window.request_animation_frame();

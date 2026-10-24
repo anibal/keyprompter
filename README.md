@@ -16,6 +16,7 @@ Without an argument it reopens the last rundown. Use File > Open (⌘O) to pick 
 | ← PageUp ↑ Backspace | Previous slide |
 | Home | First slide, reset the timer |
 | End | Last slide |
+| ⌃⌥→ / ⌃⌥← | Next / previous slide from any app, no focus needed |
 | ⌘O | Open a rundown |
 | ⌘H | Hide |
 | ⌘Q | Quit |
@@ -25,6 +26,8 @@ To build `target/release/KeyPrompter.app` (ad-hoc signed, opens `.md` files from
 ```sh
 scripts/bundle.sh
 ```
+
+The strip is hidden from screenshots, screen sharing and recordings by default. View > Hide from Screen Capture turns that off. With Reduce Motion on in System Settings, slides change without the slide animation.
 
 ## Rundown format
 

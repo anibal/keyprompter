@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use keyprompter::state::{Frame, State, load, save};
+use keyprompter::state::{Capture, Frame, State, load, save};
 
 #[test]
 fn state_round_trips_through_the_file() {
@@ -14,6 +14,7 @@ fn state_round_trips_through_the_file() {
             h: 150.0,
         }),
         deck: Some(PathBuf::from("/Users/me/My Shows/rundown.md")),
+        capture: Capture::Shown,
     };
     save(&path, &state).unwrap();
     assert_eq!(load(&path), state);
@@ -23,6 +24,12 @@ fn state_round_trips_through_the_file() {
 #[test]
 fn a_missing_file_is_an_empty_state() {
     assert_eq!(load("/nonexistent/kp/state.txt".as_ref()), State::default());
+}
+
+#[test]
+fn the_strip_starts_hidden_from_capture() {
+    assert_eq!(State::parse("capture maybe\n").capture, Capture::Hidden);
+    assert_eq!(State::default().capture, Capture::Hidden);
 }
 
 #[test]

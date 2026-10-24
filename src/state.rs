@@ -31,6 +31,15 @@ impl Frame {
 pub struct State {
     pub frame: Option<Frame>,
     pub deck: Option<PathBuf>,
+    pub capture: Capture,
+}
+
+/// Whether screen captures and recordings include the strip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Capture {
+    #[default]
+    Hidden,
+    Shown,
 }
 
 impl State {
@@ -40,6 +49,7 @@ impl State {
             match key {
                 "frame" => state.frame = Frame::parse(value),
                 "deck" if !value.is_empty() => state.deck = Some(PathBuf::from(value)),
+                "capture" if value == "shown" => state.capture = Capture::Shown,
                 _ => {}
             }
         }
@@ -53,6 +63,9 @@ impl State {
         }
         if let Some(deck) = &self.deck {
             out += &format!("deck {}\n", deck.display());
+        }
+        if self.capture == Capture::Shown {
+            out += "capture shown\n";
         }
         out
     }
