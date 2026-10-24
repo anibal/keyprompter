@@ -1,3 +1,4 @@
+pub mod app;
 pub mod deck;
 pub mod frame;
 pub mod show;

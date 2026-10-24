@@ -19,7 +19,10 @@ fn open_path(
     cx: &mut TestAppContext,
     path: std::path::PathBuf,
 ) -> (AnyWindowHandle, Entity<StageView>) {
-    cx.update(gpui_kit::init);
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        keyprompter::app::init(cx);
+    });
     let opened = cx.update(|cx| {
         gpui_kit::open_window(
             WindowOptions {

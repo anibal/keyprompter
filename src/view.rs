@@ -7,6 +7,7 @@ use std::{
 use gpui_kit::*;
 
 use crate::{
+    app::{First, Last, Next, Prev},
     deck::{Block, Span, SpanStyle, parse},
     frame::{self, Frame},
     show::{Command, Show, format_elapsed},
@@ -16,36 +17,6 @@ use crate::{
 const COLUMN_W: f32 = 200.0;
 const MAX_CARD_W: f32 = 420.0;
 const CARD_VPAD: f32 = 12.0;
-
-enum Input {
-    Show(Command),
-    Quit,
-}
-
-const KEYS: &[(&str, Input)] = &[
-    ("right", Input::Show(Command::Next)),
-    ("space", Input::Show(Command::Next)),
-    ("pagedown", Input::Show(Command::Next)),
-    ("down", Input::Show(Command::Next)),
-    ("left", Input::Show(Command::Prev)),
-    ("pageup", Input::Show(Command::Prev)),
-    ("up", Input::Show(Command::Prev)),
-    ("backspace", Input::Show(Command::Prev)),
-    ("home", Input::Show(Command::First)),
-    ("end", Input::Show(Command::Last)),
-    ("cmd-q", Input::Quit),
-];
-
-fn lookup(key: &Keystroke) -> Option<&'static Input> {
-    let name = if key.modifiers.platform {
-        format!("cmd-{}", key.key)
-    } else {
-        key.key.clone()
-    };
-    KEYS.iter()
-        .find(|(k, _)| *k == name)
-        .map(|(_, input)| input)
-}
 
 struct Theme {
     bg: Hsla,
@@ -191,15 +162,9 @@ impl StageView {
         }
     }
 
-    fn on_key(&mut self, e: &KeyDownEvent, cx: &mut Context<Self>) {
-        match lookup(&e.keystroke) {
-            Some(Input::Show(cmd)) => {
-                self.show.apply(cmd.clone(), Instant::now());
-                cx.notify();
-            }
-            Some(Input::Quit) => cx.quit(),
-            None => {}
-        }
+    fn command(&mut self, cmd: Command, cx: &mut Context<Self>) {
+        self.show.apply(cmd, Instant::now());
+        cx.notify();
     }
 }
 
@@ -391,7 +356,10 @@ impl Render for StageView {
         div()
             .id("root")
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| this.on_key(e, cx)))
+            .on_action(cx.listener(|this, _: &Next, _, cx| this.command(Command::Next, cx)))
+            .on_action(cx.listener(|this, _: &Prev, _, cx| this.command(Command::Prev, cx)))
+            .on_action(cx.listener(|this, _: &First, _, cx| this.command(Command::First, cx)))
+            .on_action(cx.listener(|this, _: &Last, _, cx| this.command(Command::Last, cx)))
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
             .size_full()
             .flex()

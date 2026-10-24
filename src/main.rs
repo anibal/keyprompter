@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use gpui_kit::*;
 use keyprompter::{
+    app,
     frame::{self, Frame},
     view::StageView,
 };
@@ -17,6 +18,7 @@ fn main() {
 
     application().run(move |cx| {
         init(cx);
+        app::init(cx);
         let saved = frame_path.as_deref().and_then(frame::load);
         let frame = saved.unwrap_or_else(|| Frame {
             x: 0.0,
