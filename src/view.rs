@@ -89,6 +89,8 @@ pub struct StageView {
     content_h: f32,
     /// The gesture in flight. While one lives it owns the frame.
     drag: Option<Drag>,
+    /// Moves `place` has queued that haven't landed yet.
+    placing: usize,
     _drag_task: Option<Task<()>>,
     _subscriptions: [Subscription; 3],
     _tick: Task<()>,
@@ -141,6 +143,7 @@ impl StageView {
             saved,
             state_path,
             drag: None,
+            placing: 0,
             _drag_task: None,
             _subscriptions: subscriptions,
             _tick: tick,
@@ -150,7 +153,7 @@ impl StageView {
         cx.on_next_frame(window, |this, window, cx| {
             let saved = this.saved.placement.as_ref();
             match saved.and_then(|p| p.frame_on(&platform::screens())) {
-                Some(frame) => place(frame, window, cx),
+                Some(frame) => this.place(frame, window, cx),
                 None => this.moved(window, cx),
             }
         });
@@ -389,7 +392,7 @@ impl StageView {
                 } else {
                     snap::pushed(frame, edge, screen)
                 };
-                place(pushed, window, cx);
+                self.place(pushed, window, cx);
                 return;
             }
             Some(edge) => Gesture::Resize(edge),
@@ -412,7 +415,7 @@ impl StageView {
     }
 
     /// One step of the gesture: the frame the pointer asks for, or on release
-    /// the settled frame, whose bounds notification saves it. `false` once the
+    /// the settled frame, which `place` saves once it lands. `false` once the
     /// gesture is over.
     fn drag_tick(&mut self, window: &Window, cx: &mut Context<Self>) -> bool {
         let Some(drag) = self.drag else {
@@ -422,11 +425,11 @@ impl StageView {
         let screens = platform::screens();
         let frame = drag.step(p.at, p.option, &screens);
         if p.down {
-            place(frame, window, cx);
+            self.place(frame, window, cx);
             return true;
         }
         self.drag = None;
-        place(snap::release(frame, &screens), window, cx);
+        self.place(snap::release(frame, &screens), window, cx);
         false
     }
 
@@ -440,9 +443,9 @@ impl StageView {
 
     /// Classifies the live frame, records the width, saves when changed, and
     /// says when the stick changed. A test window has no frame and keeps the
-    /// saved placement. Nothing is saved mid-gesture.
+    /// saved placement. Nothing is saved mid-gesture or mid-move.
     fn persist(&mut self, window: &Window, cx: &mut Context<Self>) {
-        if self.drag.is_some() {
+        if self.drag.is_some() || self.placing > 0 {
             return;
         }
         let placement = platform::frame(window)
@@ -489,7 +492,7 @@ impl StageView {
                 top: 0.0,
                 ..placement
             };
-            place(placed.on(target), window, cx);
+            self.place(placed.on(target), window, cx);
         }
     }
 
@@ -503,7 +506,7 @@ impl StageView {
         if let Some(screen) = snap::holding(frame, &screens)
             && let Some(placement) = snap::classify(frame, &screens, self.widths())
         {
-            place(placement.stuck(side, frame, screen), window, cx);
+            self.place(placement.stuck(side, frame, screen), window, cx);
         }
     }
 
@@ -525,24 +528,34 @@ impl StageView {
             w,
             h,
         };
-        place(frame, window, cx);
+        self.place(frame, window, cx);
+    }
+
+    /// Moves the strip to `frame` from a task, outside any update, because the
+    /// move calls back into GPUI: AppKit reports the new bounds, and the
+    /// redraw for the new frame renders on the spot. Saving waits until the
+    /// move lands, so the frame macOS first shows the strip at, before the
+    /// saved placement goes back on, is never saved.
+    fn place(&mut self, frame: Rect, window: &Window, cx: &mut Context<Self>) {
+        let Some(view) = platform::ns_view(window) else {
+            return;
+        };
+        self.placing += 1;
+        cx.spawn_in(window, async move |this, cx| {
+            platform::move_and_redraw(&view, frame);
+            this.update_in(cx, |this, window, cx| {
+                this.placing -= 1;
+                this.persist(window, cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub fn command(&mut self, cmd: Command, cx: &mut Context<Self>) {
         self.show.apply(cmd, self.slides().len(), Instant::now());
         cx.notify();
     }
-}
-
-/// Moves the strip to `frame` once this update ends. AppKit reports the new
-/// size to GPUI on the spot, but that report needs the window, which the
-/// update still holds, so the viewport is refreshed by hand. That also runs
-/// the bounds observers, which settle and save.
-fn place(frame: Rect, window: &Window, cx: &mut App) {
-    window.defer(cx, move |window, cx| {
-        platform::set_frame(window, frame);
-        window.bounds_changed(cx);
-    });
 }
 
 fn wall_clock() -> String {

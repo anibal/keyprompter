@@ -80,9 +80,24 @@ pub fn frame(window: &Window) -> Option<Rect> {
     Some(rect(ns_window(window)?.frame()))
 }
 
-pub fn set_frame(window: &Window, frame: Rect) {
-    if let Some(ns_window) = ns_window(window) {
-        ns_window.setFrame_display(ns_rect(frame), true);
+/// Moves the window, then draws the content for the new frame before
+/// returning, so the content presents in the same transaction as the move
+/// instead of a display-link frame later. GPUI's `displayLayer:` renders
+/// synchronously, and its callbacks need the app, so call this outside any
+/// GPUI update.
+pub fn move_and_redraw(view: &NSView, frame: Rect) {
+    let Some(window) = view.window() else {
+        return;
+    };
+    window.setFrame_display(ns_rect(frame), false);
+    // SAFETY: a layer-backed view's layer is a CALayer, and these are its
+    // plain display messages, sent on the main thread.
+    unsafe {
+        let layer: Option<Retained<AnyObject>> = msg_send![view, layer];
+        if let Some(layer) = layer {
+            let _: () = msg_send![&*layer, setNeedsDisplay];
+            let _: () = msg_send![&*layer, displayIfNeeded];
+        }
     }
 }
 
