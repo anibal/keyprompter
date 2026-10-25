@@ -1,17 +1,20 @@
 //! The AppKit calls GPUI doesn't wrap.
 
 use gpui_kit::Window;
-use std::sync::Once;
+use std::{cell::Cell, sync::Once};
 
 use objc2::{
-    MainThreadMarker,
+    MainThreadMarker, MainThreadOnly, Message, define_class,
     ffi::class_addMethod,
+    msg_send,
     rc::Retained,
     runtime::{AnyClass, AnyObject, Imp, Sel},
     sel,
 };
-use objc2_app_kit::{NSEvent, NSScreen, NSView, NSWindow, NSWindowSharingType, NSWorkspace};
-use objc2_foundation::{NSPoint, NSRect, NSSize};
+use objc2_app_kit::{
+    NSEvent, NSMenu, NSMenuItem, NSScreen, NSView, NSWindow, NSWindowSharingType, NSWorkspace,
+};
+use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 use crate::{
@@ -195,4 +198,85 @@ pub fn restore(window: &Window, frame: Frame) {
     } else {
         move_to_top(window, Some(0));
     }
+}
+
+thread_local! {
+    static CHOSEN: Cell<Option<isize>> = const { Cell::new(None) };
+}
+
+define_class!(
+    // SAFETY: NSObject has no subclassing requirements, and MenuTarget has no Drop.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    struct MenuTarget;
+
+    impl MenuTarget {
+        #[unsafe(method(choose:))]
+        fn choose(&self, item: &NSMenuItem) {
+            CHOSEN.set(Some(item.tag()));
+        }
+    }
+
+    unsafe impl NSObjectProtocol for MenuTarget {}
+);
+
+impl MenuTarget {
+    fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(());
+        // SAFETY: NSObject's init on a freshly allocated object.
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+pub fn ns_view(window: &Window) -> Option<Retained<NSView>> {
+    let handle = HasWindowHandle::window_handle(window).ok()?;
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return None;
+    };
+    // SAFETY: GPUI's live NSView for this window; retaining keeps it valid.
+    let view: &NSView = unsafe { handle.ns_view.cast().as_ref() };
+    Some(view.retain())
+}
+
+/// Shows a native menu at `at` (window points from the top-left) and waits
+/// for a choice. `None` items are separators. The menu runs its own event
+/// loop, so call this outside any GPUI update, or GPUI work that runs while
+/// the menu is open would find the app already borrowed.
+pub fn context_menu(view: &NSView, items: &[Option<&str>], at: (f32, f32)) -> Option<usize> {
+    let mtm = MainThreadMarker::new()?;
+    let target = MenuTarget::new(mtm);
+    let menu = NSMenu::new(mtm);
+    for (i, item) in items.iter().enumerate() {
+        let entry = match item {
+            None => NSMenuItem::separatorItem(mtm),
+            Some(title) => {
+                // SAFETY: choose: is defined on MenuTarget, which outlives the menu.
+                let entry = unsafe {
+                    NSMenuItem::initWithTitle_action_keyEquivalent(
+                        NSMenuItem::alloc(mtm),
+                        &NSString::from_str(title),
+                        Some(sel!(choose:)),
+                        &NSString::new(),
+                    )
+                };
+                // SAFETY: the target is retained until this function returns.
+                unsafe { entry.setTarget(Some(&target)) };
+                entry.setTag(i as isize);
+                entry
+            }
+        };
+        menu.addItem(&entry);
+    }
+    let y = if view.isFlipped() {
+        at.1
+    } else {
+        view.frame().size.height as f32 - at.1
+    };
+    CHOSEN.set(None);
+    menu.popUpMenuPositioningItem_atLocation_inView(
+        None,
+        NSPoint::new(at.0.into(), y.into()),
+        Some(view),
+    );
+    CHOSEN.take().map(|i| i as usize)
 }

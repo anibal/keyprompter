@@ -256,3 +256,13 @@ async fn undo_never_hands_out_a_discarded_card_id_again(cx: &mut TestAppContext)
     act(cx, keyprompter::app::DuplicateCard);
     assert_ne!(ids(cx)[1], first_copy);
 }
+
+#[gpui_kit::test]
+async fn right_clicking_a_card_makes_it_current(cx: &mut TestAppContext) {
+    let (handle, view) = open(cx, "## a\n## b\n## c\n");
+    let mut cx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    let next_card = gpui_kit::point(px(942.), px(75.));
+    cx.simulate_mouse_down(next_card, gpui_kit::MouseButton::Right, Default::default());
+    cx.run_until_parked();
+    assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 1);
+}

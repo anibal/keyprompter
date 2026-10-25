@@ -24,6 +24,20 @@ const CARD_VPAD: f32 = 12.0;
 const CARD_PAD: f32 = 10.0;
 const SNAP_REACH: f32 = 24.0;
 
+/// A card edit that a menu item applies to the card it names.
+type CardEdit = fn(CardId) -> Edit;
+
+/// The right-click menu of a card; `None` is a separator.
+const CARD_MENU: &[Option<(&str, CardEdit)>] = &[
+    Some(("Duplicate Card", Edit::Duplicate)),
+    Some(("Merge with Next Card", Edit::MergeWithNext)),
+    None,
+    Some(("Move Card Earlier", Edit::MoveEarlier)),
+    Some(("Move Card Later", Edit::MoveLater)),
+    None,
+    Some(("Delete Card", Edit::Delete)),
+];
+
 /// The rundown with the card that was current, for undo.
 type Snapshot = (Rundown, Option<CardId>);
 
@@ -276,6 +290,33 @@ impl StageView {
         cx.notify();
     }
 
+    /// Makes the right-clicked card current, then offers the card edits in a
+    /// native menu.
+    fn card_menu(
+        &mut self,
+        index: usize,
+        at: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show.apply(Command::Goto(index), Instant::now());
+        cx.notify();
+        let Some(ns_view) = platform::ns_view(window) else {
+            return;
+        };
+        let titles: Vec<_> = CARD_MENU.iter().map(|item| item.map(|(t, _)| t)).collect();
+        // A spawned task runs outside any GPUI update, which the menu's own
+        // event loop needs.
+        cx.spawn_in(window, async move |this, cx| {
+            let chosen =
+                platform::context_menu(&ns_view, &titles, (f32::from(at.x), f32::from(at.y)));
+            if let Some((_, edit)) = chosen.and_then(|i| CARD_MENU[i]) {
+                this.update(cx, |v, cx| v.edit(edit, cx)).ok();
+            }
+        })
+        .detach();
+    }
+
     pub fn show_error(&mut self, error: String, cx: &mut Context<Self>) {
         self.error = Some(error);
         cx.notify();
@@ -359,7 +400,7 @@ fn rich(spans: &[Span], color: Hsla, code_bg: Hsla, window: &Window) -> StyledTe
 }
 
 impl Render for StageView {
-    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let now = Instant::now();
         let target = self.show.cursor() as f32;
         let dt = self
@@ -463,6 +504,12 @@ impl Render for StageView {
                 Some(
                     div()
                         .id(("slide", i))
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                                this.card_menu(i, e.position, window, cx)
+                            }),
+                        )
                         .absolute()
                         .left(px(center - w / 2.0))
                         .top(px((win_h - h) / 2.0))
