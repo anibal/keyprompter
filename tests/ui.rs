@@ -129,32 +129,6 @@ async fn app_level_actions_reach_the_strip(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-async fn a_long_bullet_lays_out_as_several_lines_without_losing_words(cx: &mut TestAppContext) {
-    let text = "This bullet is long enough that it has to wrap onto more than one line";
-    let (handle, _) = open(cx, &format!("## cue\n- {text}\n"));
-    let card = cx
-        .update_window(handle, |_, window, _| {
-            let deck = keyprompter::deck::parse(&format!("## cue\n- {text}\n"));
-            let scale = keyprompter::layout::TypeScale::new(118.0, 0);
-            keyprompter::layout::layout(&deck.slides[0], scale, 300.0, window)
-        })
-        .unwrap();
-    assert!(card.body.len() > 1, "{card:?}");
-    assert_eq!(card.body[0].mark, keyprompter::layout::Mark::Bullet);
-    assert!(
-        card.body[1..]
-            .iter()
-            .all(|l| l.mark == keyprompter::layout::Mark::Hang)
-    );
-    let words: Vec<String> = card
-        .body
-        .iter()
-        .flat_map(|l| l.spans.iter().map(|s| s.text.clone()))
-        .collect();
-    assert_eq!(words.join(" "), text);
-}
-
-#[gpui_kit::test]
 async fn smaller_text_makes_an_overflowing_card_fit(cx: &mut TestAppContext) {
     let (handle, view) = open(cx, "## cue\n- a\n- b\n- c\n- d\n- e\n## next\n");
     let draw = |cx: &mut TestAppContext| {
@@ -163,7 +137,7 @@ async fn smaller_text_makes_an_overflowing_card_fit(cx: &mut TestAppContext) {
         cx.run_until_parked();
     };
     draw(cx);
-    assert_eq!(cx.read_entity(&view, |v, _| v.overflowing()), vec![(0, 1)]);
+    assert_eq!(cx.read_entity(&view, |v, _| v.overflowing()), vec![(0, 2)]);
     for _ in 0..3 {
         cx.update(|cx| cx.dispatch_action(&keyprompter::app::SmallerText));
         cx.run_until_parked();

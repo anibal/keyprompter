@@ -23,3 +23,4 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 
 [dev-dependencies]
 gpui-kit = { version = "=0.7.3", features = ["test-support"] }
+gpui-pre-apple = "=0.3.9"

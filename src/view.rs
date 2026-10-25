@@ -71,6 +71,7 @@ pub struct StageView {
     generation: u64,
     layouts: Vec<CardLayout>,
     layout_key: Option<(u64, TypeScale, f32)>,
+    content_h: f32,
     settling: Option<Task<()>>,
     _subscriptions: [Subscription; 3],
     _tick: Task<()>,
@@ -113,10 +114,11 @@ impl StageView {
             mtime: None,
             error: None,
             capture: saved.capture,
-            text_step: saved.text,
+            text_step: saved.text.clamp(layout::MIN_STEP, layout::MAX_STEP),
             generation: 0,
             layouts: Vec::new(),
             layout_key: None,
+            content_h: 0.0,
             saved,
             state_path,
             settling: None,
@@ -157,15 +159,15 @@ impl StageView {
         cx.notify();
     }
 
-    /// The cards that don't fit, as `(slide index, hidden body lines)`.
+    /// The cards that don't fit, as `(slide index, hidden lines)`.
     pub fn overflowing(&self) -> Vec<(usize, usize)> {
-        let Some((_, scale, content_h)) = self.layout_key else {
+        let Some((_, scale, _)) = self.layout_key else {
             return Vec::new();
         };
         self.layouts
             .iter()
             .enumerate()
-            .map(|(i, card)| (i, card.hidden_body(scale, content_h)))
+            .map(|(i, card)| (i, card.fit(scale, self.content_h).hidden))
             .filter(|&(_, hidden)| hidden > 0)
             .collect()
     }
@@ -188,6 +190,7 @@ impl StageView {
         self.source = Some(source);
         self.mtime = None;
         self.show = Show::new(Default::default());
+        self.generation += 1;
         self.reload_if_changed();
         self.persist(window);
         cx.notify();
@@ -323,7 +326,8 @@ impl Render for StageView {
 
         let content_h = card_h - 2.0 * CARD_PAD;
         let scale = TypeScale::new(content_h, self.text_step);
-        let key = (self.generation, scale, content_h);
+        self.content_h = content_h;
+        let key = (self.generation, scale, card_w);
         if self.layout_key != Some(key) {
             self.layouts = self
                 .show
@@ -348,9 +352,8 @@ impl Render for StageView {
                 }
                 let cue_h = scale.cue * LINE_HEIGHT * s.scale;
                 let body_h = scale.body * LINE_HEIGHT * s.scale;
-                let visible = card.visible_body(scale, content_h);
-                let hidden = card.body.len() - visible;
-                let cue = card.cue.iter().map(|line| {
+                let fit = card.fit(scale, content_h);
+                let cue = card.cue[..fit.cue].iter().map(|line| {
                     div()
                         .h(px(cue_h))
                         .line_height(px(cue_h))
@@ -359,7 +362,7 @@ impl Render for StageView {
                         .whitespace_nowrap()
                         .child(line.clone())
                 });
-                let body = card.body[..visible].iter().map(|line| {
+                let body = card.body[..fit.body].iter().map(|line| {
                     let marker = match line.mark {
                         Mark::None => None,
                         Mark::Bullet => Some("•"),
@@ -380,18 +383,23 @@ impl Render for StageView {
                         }))
                         .child(rich(&line.spans, t.fg, t.code_bg, window))
                 });
-                let more = (hidden > 0).then(|| {
+                let more = (fit.hidden > 0).then(|| {
                     div()
-                        .absolute()
-                        .right(px(CARD_PAD * s.scale))
-                        .bottom(px(4.0 * s.scale))
-                        .px(px(6.0 * s.scale))
-                        .rounded(px(6.0 * s.scale))
-                        .bg(t.error)
-                        .text_color(t.bg.opacity(1.0))
-                        .text_size(px(scale.body * 0.75 * s.scale))
-                        .font_weight(FontWeight::BOLD)
-                        .child(format!("+{hidden}"))
+                        .flex()
+                        .justify_end()
+                        .items_center()
+                        .h(px(body_h))
+                        .child(
+                            div()
+                                .px(px(6.0 * s.scale))
+                                .rounded(px(6.0 * s.scale))
+                                .bg(t.error)
+                                .text_color(t.bg.opacity(1.0))
+                                .text_size(px(scale.body * 0.75 * s.scale))
+                                .line_height(px(scale.body * 1.1 * s.scale))
+                                .font_weight(FontWeight::BOLD)
+                                .child(format!("+{} lines", fit.hidden)),
+                        )
                 });
                 Some(
                     div()

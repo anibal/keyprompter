@@ -30,7 +30,7 @@ scripts/bundle.sh
 
 The icon in `assets/AppIcon.icns` comes from `swift scripts/icon.swift assets/AppIcon.icns`.
 
-Text size follows the strip height: the cue line and four lines of text fill a card. View > Bigger Text, Smaller Text and Default Text Size adjust it, and the choice is saved. Every card is laid out once at full size, so the smaller cards beside the current one show the same lines, only smaller. Text never shrinks to fit: a card with more lines than it can hold shows a red +N badge, and the left column names it.
+Text size follows the strip height: the cue line and four lines of text fill a card. View > Bigger Text, Smaller Text and Default Text Size adjust it, and the choice is saved. Every card is laid out once at full size, so the smaller cards beside the current one show the same lines, only smaller. Text never shrinks to fit: a card with more lines than it can hold gives its last row to a red "+N lines" badge, and the left column names it.
 
 The strip is hidden from screenshots, screen sharing and recordings by default. View > Hide from Screen Capture turns that off. With Reduce Motion on in System Settings, slides change without the slide animation.
 
