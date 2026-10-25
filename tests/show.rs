@@ -1,26 +1,14 @@
 use std::time::{Duration, Instant};
 
-use keyprompter::deck::Deck;
-use keyprompter::rundown::Rundown;
 use keyprompter::show::{Command, Show};
-
-fn parse(markdown: &str) -> Deck {
-    Rundown::import(markdown, "").deck()
-}
-
-fn show(n: usize) -> Show {
-    Show::new(parse(
-        &(0..n).map(|i| format!("## s{i}\n")).collect::<String>(),
-    ))
-}
 
 #[test]
 fn first_advance_starts_the_timer_and_it_keeps_running() {
     let t0 = Instant::now();
-    let mut s = show(3);
+    let (mut s, len) = (Show::default(), 3);
     assert_eq!(s.elapsed(t0), None);
-    s.apply(Command::Next, t0);
-    s.apply(Command::Next, t0 + Duration::from_secs(5));
+    s.apply(Command::Next, len, t0);
+    s.apply(Command::Next, len, t0 + Duration::from_secs(5));
     assert_eq!(
         s.elapsed(t0 + Duration::from_secs(10)),
         Some(Duration::from_secs(10))
@@ -29,19 +17,19 @@ fn first_advance_starts_the_timer_and_it_keeps_running() {
 
 #[test]
 fn prev_alone_does_not_start_the_timer() {
-    let mut s = show(3);
-    s.apply(Command::Prev, Instant::now());
+    let (mut s, len) = (Show::default(), 3);
+    s.apply(Command::Prev, len, Instant::now());
     assert_eq!(s.elapsed(Instant::now()), None);
 }
 
 #[test]
 fn cursor_clamps_at_both_ends() {
     let now = Instant::now();
-    let mut s = show(3);
-    s.apply(Command::Prev, now);
+    let (mut s, len) = (Show::default(), 3);
+    s.apply(Command::Prev, len, now);
     assert_eq!(s.cursor(), 0);
     for _ in 0..10 {
-        s.apply(Command::Next, now);
+        s.apply(Command::Next, len, now);
     }
     assert_eq!(s.cursor(), 2);
 }
@@ -49,34 +37,20 @@ fn cursor_clamps_at_both_ends() {
 #[test]
 fn first_and_last_jump_and_first_resets_the_timer() {
     let now = Instant::now();
-    let mut s = show(4);
-    s.apply(Command::Last, now);
+    let (mut s, len) = (Show::default(), 4);
+    s.apply(Command::Last, len, now);
     assert_eq!(s.cursor(), 3);
-    s.apply(Command::Next, now);
-    s.apply(Command::First, now);
+    s.apply(Command::Next, len, now);
+    s.apply(Command::First, len, now);
     assert_eq!(s.cursor(), 0);
     assert_eq!(s.elapsed(now), None);
 }
 
 #[test]
-fn reload_clamps_cursor_and_keeps_timer() {
-    let now = Instant::now();
-    let mut s = show(5);
-    s.apply(Command::Next, now);
-    s.apply(Command::Last, now);
-    s.apply(Command::Reload(parse("## only\n## two\n")), now);
-    assert_eq!(s.cursor(), 1);
-    assert_eq!(s.elapsed(now), Some(Duration::ZERO));
-    s.apply(Command::Reload(parse("")), now);
-    assert_eq!(s.cursor(), 0);
-    assert!(s.current().is_none());
-}
-
-#[test]
 fn empty_deck_is_legal() {
-    let mut s = show(0);
-    s.apply(Command::Next, Instant::now());
-    s.apply(Command::Last, Instant::now());
+    let (mut s, len) = (Show::default(), 0);
+    s.apply(Command::Next, len, Instant::now());
+    s.apply(Command::Last, len, Instant::now());
     assert_eq!(s.cursor(), 0);
 }
 

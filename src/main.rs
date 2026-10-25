@@ -8,7 +8,9 @@ use std::{
 use futures::{StreamExt, channel::mpsc};
 use gpui_kit::*;
 use keyprompter::{
-    app, hotkeys,
+    app,
+    document::Document,
+    hotkeys,
     library::Library,
     state::{self, Frame},
     view::StageView,
@@ -39,7 +41,7 @@ fn main() {
         .map(|arg| std::path::absolute(&arg).unwrap_or_else(|_| PathBuf::from(arg)));
     let (restored, restore_error) = match (&argument, &saved.rundown) {
         (None, Some(id)) => match library.load(id) {
-            Ok(rundown) => (Some((id.clone(), rundown)), None),
+            Ok(rundown) => (Some(Document::new(id.clone(), rundown)), None),
             Err(e) => (None, Some(format!("Can't reopen the last rundown: {e}"))),
         },
         _ => (None, None),

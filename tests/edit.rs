@@ -1,4 +1,5 @@
 use keyprompter::{
+    document::Document,
     history::History,
     rundown::{CardId, Edit, Rundown},
 };
@@ -170,4 +171,23 @@ fn merging_a_card_with_an_empty_cue_adds_no_stray_bullet() {
 fn import_drops_a_section_with_no_cards() {
     let r = Rundown::import("# Empty\n# Real\n## card\n", "s");
     assert_eq!(layout(&r), sections(&[(Some("Real"), &["card"])]));
+}
+
+#[test]
+fn a_document_keeps_its_deck_in_step_and_says_which_card_to_show() {
+    let cues =
+        |d: &Document| -> Vec<String> { d.deck().slides.iter().map(|s| s.cue.clone()).collect() };
+    let mut d = Document::new("s".into(), Rundown::import("## a\n## b\n## c\n", "s"));
+    assert_eq!(
+        d.edit(2, Edit::Delete),
+        Some(1),
+        "deleting the last card shows the one before"
+    );
+    assert_eq!(cues(&d), ["a", "b"]);
+    assert_eq!(d.undo(1), Some(2), "undo shows the card that was current");
+    assert_eq!(cues(&d), ["a", "b", "c"]);
+    assert_eq!(d.redo(2), Some(1));
+    assert_eq!(cues(&d), ["a", "b"]);
+    assert_eq!(d.redo(1), None, "nothing left to redo");
+    assert_eq!(d.edit(9, Edit::Delete), None, "no card there");
 }

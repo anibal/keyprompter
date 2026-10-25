@@ -200,7 +200,7 @@ pub fn init(cx: &mut App) {
 pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Library, cx: &mut App) {
     fn route<A: Action>(view: &Entity<StageView>, cmd: Command, cx: &mut App) {
         let view = view.clone();
-        cx.on_action(move |_: &A, cx| view.update(cx, |v, cx| v.command(cmd.clone(), cx)));
+        cx.on_action(move |_: &A, cx| view.update(cx, |v, cx| v.command(cmd, cx)));
     }
     route::<Next>(&view, Command::Next, cx);
     route::<Prev>(&view, Command::Prev, cx);
@@ -298,7 +298,7 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
     cx.on_action({
         let view = view.clone();
         move |_: &Export, cx| {
-            let Some((_, rundown)) = view.read(cx).rundown().cloned() else {
+            let Some(rundown) = view.read(cx).document().map(|d| d.rundown().clone()) else {
                 view.update(cx, |v, cx| v.show_error("No rundown to export".into(), cx));
                 return;
             };
@@ -328,8 +328,8 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
         move |action: &OpenRecent, cx| {
             if view
                 .read(cx)
-                .rundown()
-                .is_some_and(|(id, _)| *id == action.id)
+                .document()
+                .is_some_and(|d| d.id() == action.id)
             {
                 return;
             }

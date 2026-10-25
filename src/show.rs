@@ -1,41 +1,34 @@
 use std::time::{Duration, Instant};
 
-use crate::deck::{Deck, Slide};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Timer {
+    #[default]
     Idle,
-    Running { started: Instant },
+    Running {
+        started: Instant,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     Next,
     Prev,
     First,
     Last,
-    Reload(Deck),
     Goto(usize),
 }
 
-#[derive(Debug, Clone)]
+/// Where the strip is in a deck of cards, and since when it has been running.
+#[derive(Debug, Clone, Default)]
 pub struct Show {
-    deck: Deck,
     cursor: usize,
     timer: Timer,
 }
 
 impl Show {
-    pub fn new(deck: Deck) -> Self {
-        Self {
-            deck,
-            cursor: 0,
-            timer: Timer::Idle,
-        }
-    }
-
-    pub fn apply(&mut self, cmd: Command, now: Instant) {
-        let last = self.deck.slides.len().saturating_sub(1);
+    /// Moves within a deck of `len` cards.
+    pub fn apply(&mut self, cmd: Command, len: usize, now: Instant) {
+        let last = len.saturating_sub(1);
         match cmd {
             Command::Next => {
                 if self.timer == Timer::Idle {
@@ -50,23 +43,11 @@ impl Show {
             }
             Command::Last => self.cursor = last,
             Command::Goto(index) => self.cursor = index.min(last),
-            Command::Reload(deck) => {
-                self.deck = deck;
-                self.cursor = self.cursor.min(self.deck.slides.len().saturating_sub(1));
-            }
         }
-    }
-
-    pub fn slides(&self) -> &[Slide] {
-        &self.deck.slides
     }
 
     pub fn cursor(&self) -> usize {
         self.cursor
-    }
-
-    pub fn current(&self) -> Option<&Slide> {
-        self.deck.slides.get(self.cursor)
     }
 
     pub fn elapsed(&self, now: Instant) -> Option<Duration> {

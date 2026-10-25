@@ -7,6 +7,7 @@ use gpui_kit::{
 };
 use keyprompter::{
     app::open_markdown,
+    document::Document,
     library::Library,
     rundown::Rundown,
     state::{Capture, State},
@@ -32,7 +33,7 @@ fn open_in(
         gpui_kit::init(cx);
         keyprompter::app::init(cx);
     });
-    let rundown = Some(("test".to_string(), Rundown::import(deck, "test")));
+    let document = Some(Document::new("test".into(), Rundown::import(deck, "test")));
     let opened = cx.update(|cx| {
         gpui_kit::open_window(
             WindowOptions {
@@ -46,7 +47,14 @@ fn open_in(
             cx,
             |window, cx| {
                 cx.new(|cx| {
-                    StageView::new(rundown, library.clone(), State::default(), None, window, cx)
+                    StageView::new(
+                        document,
+                        library.clone(),
+                        State::default(),
+                        None,
+                        window,
+                        cx,
+                    )
                 })
             },
         )
@@ -173,9 +181,9 @@ async fn smaller_text_makes_an_overflowing_card_fit(cx: &mut TestAppContext) {
 
 fn cues(cx: &mut TestAppContext, view: &Entity<StageView>) -> Vec<String> {
     cx.read_entity(view, |v, _| {
-        v.rundown()
+        v.document()
             .unwrap()
-            .1
+            .rundown()
             .sections
             .iter()
             .flat_map(|s| s.cards.iter().map(|c| c.cue.clone()))
@@ -248,8 +256,9 @@ async fn cmd_z_on_the_strip_undoes_and_a_failed_save_error_clears_on_the_next_sa
 #[gpui_kit::test]
 async fn undo_never_hands_out_a_discarded_card_id_again(cx: &mut TestAppContext) {
     let (_, view) = open(cx, "## a\n");
-    let ids =
-        |cx: &mut TestAppContext| cx.read_entity(&view, |v, _| v.rundown().unwrap().1.card_ids());
+    let ids = |cx: &mut TestAppContext| {
+        cx.read_entity(&view, |v, _| v.document().unwrap().rundown().card_ids())
+    };
     act(cx, keyprompter::app::DuplicateCard);
     let first_copy = ids(cx)[1];
     act(cx, keyprompter::app::Undo);

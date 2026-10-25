@@ -39,7 +39,7 @@ pub fn listen(view: Entity<StageView>, cx: &mut App) {
         let _registered = manager;
         while let Some(id) = pressed_rx.next().await {
             if let Some((_, cmd)) = bindings.iter().find(|(hotkey, _)| hotkey.id() == id) {
-                view.update(cx, |v, cx| v.command(cmd.clone(), cx));
+                view.update(cx, |v, cx| v.command(*cmd, cx));
             }
         }
     })

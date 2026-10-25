@@ -7,8 +7,8 @@ use gpui_kit::*;
 
 use crate::{
     app,
-    deck::Span,
-    history::History,
+    deck::{Slide, Span},
+    document::Document,
     layout::{self, CardLayout, LINE_HEIGHT, Mark, TypeScale},
     library::Library,
     platform,
@@ -37,9 +37,6 @@ const CARD_MENU: &[Option<(&str, CardEdit)>] = &[
     None,
     Some(("Delete Card", Edit::Delete)),
 ];
-
-/// The rundown with the card that was current, for undo.
-type Snapshot = (Rundown, Option<CardId>);
 
 struct Theme {
     bg: Hsla,
@@ -80,19 +77,16 @@ pub struct StageView {
     show: Show,
     pos: f32,
     last_frame: Option<Instant>,
-    /// The open rundown and its library id.
-    rundown: Option<(String, Rundown)>,
+    document: Option<Document>,
     library: Library,
-    history: History<Snapshot>,
     error: Option<String>,
     state_path: Option<PathBuf>,
     saved: State,
     capture: Capture,
     text_step: i32,
-    /// Bumped whenever the deck changes, so cached layouts know they are stale.
-    generation: u64,
     layouts: Vec<CardLayout>,
-    layout_key: Option<(u64, TypeScale, f32)>,
+    /// What `layouts` were laid out for. `None` once the deck has changed.
+    layout_key: Option<(TypeScale, f32)>,
     content_h: f32,
     settling: Option<Task<()>>,
     _subscriptions: [Subscription; 3],
@@ -101,7 +95,7 @@ pub struct StageView {
 
 impl StageView {
     pub fn new(
-        rundown: Option<(String, Rundown)>,
+        document: Option<Document>,
         library: Library,
         saved: State,
         state_path: Option<PathBuf>,
@@ -130,16 +124,14 @@ impl StageView {
         });
         let view = Self {
             focus,
-            show: Show::new(rundown.as_ref().map(|(_, r)| r.deck()).unwrap_or_default()),
+            show: Show::default(),
             pos: 0.0,
             last_frame: None,
-            rundown,
+            document,
             library,
-            history: History::default(),
             error: None,
             capture: saved.capture,
             text_step: saved.text.clamp(layout::MIN_STEP, layout::MAX_STEP),
-            generation: 0,
             layouts: Vec::new(),
             layout_key: None,
             content_h: 0.0,
@@ -180,7 +172,7 @@ impl StageView {
 
     /// The cards that don't fit, as `(slide index, hidden lines)`.
     pub fn overflowing(&self) -> Vec<(usize, usize)> {
-        let Some((_, scale, _)) = self.layout_key else {
+        let Some((scale, _)) = self.layout_key else {
             return Vec::new();
         };
         self.layouts
@@ -204,86 +196,55 @@ impl StageView {
         self.persist(window);
     }
 
-    pub fn rundown(&self) -> Option<&(String, Rundown)> {
-        self.rundown.as_ref()
+    pub fn document(&self) -> Option<&Document> {
+        self.document.as_ref()
+    }
+
+    fn slides(&self) -> &[Slide] {
+        self.document.as_ref().map_or(&[], |d| &d.deck().slides)
     }
 
     /// Switches to another rundown, starting it from the first slide.
     pub fn open(&mut self, id: String, rundown: Rundown, window: &Window, cx: &mut Context<Self>) {
-        self.show = Show::new(rundown.deck());
-        self.rundown = Some((id, rundown));
-        self.history.clear();
-        self.generation += 1;
+        self.document = Some(Document::new(id, rundown));
+        self.show = Show::default();
+        self.layout_key = None;
         self.error = None;
         self.persist(window);
         cx.notify();
     }
 
-    /// The card in the middle of the strip.
-    pub fn current_card(&self) -> Option<CardId> {
-        let (_, rundown) = self.rundown.as_ref()?;
-        rundown.card_ids().get(self.show.cursor()).copied()
-    }
-
     /// Applies an edit to the current card, saves, and shows the card it focuses.
     pub fn edit(&mut self, edit: fn(CardId) -> Edit, cx: &mut Context<Self>) {
-        let before = self.current_card();
-        let (Some(id), Some((_, rundown))) = (before, &self.rundown) else {
-            return;
-        };
-        let mut next = rundown.clone();
-        let Some(focus) = next.apply(edit(id)) else {
-            return;
-        };
-        let previous = std::mem::replace(&mut self.rundown.as_mut().unwrap().1, next);
-        self.history.record((previous, before));
-        self.settle(Some(focus), cx);
-    }
-
-    pub fn undo(&mut self, cx: &mut Context<Self>) {
-        self.travel(History::undo, cx);
-    }
-
-    pub fn redo(&mut self, cx: &mut Context<Self>) {
-        self.travel(History::redo, cx);
-    }
-
-    fn travel(
-        &mut self,
-        step: fn(&mut History<Snapshot>, Snapshot) -> Option<Snapshot>,
-        cx: &mut Context<Self>,
-    ) {
-        let current = self.current_card();
-        let Some((_, rundown)) = &mut self.rundown else {
-            return;
-        };
-        let Some((restored, focus)) = step(&mut self.history, (rundown.clone(), current)) else {
-            return;
-        };
-        let next_id = rundown.next_id.max(restored.next_id);
-        *rundown = restored;
-        rundown.next_id = next_id;
+        let cursor = self.show.cursor();
+        let focus = self.document.as_mut().and_then(|d| d.edit(cursor, edit));
         self.settle(focus, cx);
     }
 
-    /// Saves the rundown after a change and keeps the strip on `focus`.
-    fn settle(&mut self, focus: Option<CardId>, cx: &mut Context<Self>) {
-        let Some((id, rundown)) = &self.rundown else {
+    pub fn undo(&mut self, cx: &mut Context<Self>) {
+        let cursor = self.show.cursor();
+        let focus = self.document.as_mut().and_then(|d| d.undo(cursor));
+        self.settle(focus, cx);
+    }
+
+    pub fn redo(&mut self, cx: &mut Context<Self>) {
+        let cursor = self.show.cursor();
+        let focus = self.document.as_mut().and_then(|d| d.redo(cursor));
+        self.settle(focus, cx);
+    }
+
+    /// After a change to the document, saves it and shows the card at `focus`.
+    fn settle(&mut self, focus: Option<usize>, cx: &mut Context<Self>) {
+        let (Some(focus), Some(document)) = (focus, &self.document) else {
             return;
         };
         self.error = self
             .library
-            .save(id, rundown)
+            .save(document.id(), document.rundown())
             .err()
             .map(|e| format!("Can't save: {e}"));
-        let index = focus.and_then(|f| rundown.card_ids().iter().position(|&i| i == f));
-        let now = Instant::now();
-        self.show.apply(Command::Reload(rundown.deck()), now);
-        if let Some(index) = index {
-            self.show.apply(Command::Goto(index), now);
-        }
-        self.generation += 1;
-        cx.notify();
+        self.command(Command::Goto(focus), cx);
+        self.layout_key = None;
     }
 
     /// Makes the right-clicked card current, then offers the card edits in a
@@ -295,8 +256,7 @@ impl StageView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.show.apply(Command::Goto(index), Instant::now());
-        cx.notify();
+        self.command(Command::Goto(index), cx);
         let Some(ns_view) = platform::ns_view(window) else {
             return;
         };
@@ -354,7 +314,7 @@ impl StageView {
         });
         let current = State {
             frame: Some(frame),
-            rundown: self.rundown.as_ref().map(|(id, _)| id.clone()),
+            rundown: self.document.as_ref().map(|d| d.id().to_owned()),
             capture: self.capture,
             text: self.text_step,
         };
@@ -367,7 +327,7 @@ impl StageView {
     }
 
     pub fn command(&mut self, cmd: Command, cx: &mut Context<Self>) {
-        self.show.apply(cmd, Instant::now());
+        self.show.apply(cmd, self.slides().len(), Instant::now());
         cx.notify();
     }
 }
@@ -423,10 +383,9 @@ impl Render for StageView {
         let content_h = card_h - 2.0 * CARD_PAD;
         let scale = TypeScale::new(content_h, self.text_step);
         self.content_h = content_h;
-        let key = (self.generation, scale, card_w);
+        let key = (scale, card_w);
         if self.layout_key != Some(key) {
             self.layouts = self
-                .show
                 .slides()
                 .iter()
                 .map(|slide| layout::layout(slide, scale, card_w - 2.0 * CARD_PAD, window))
@@ -528,17 +487,17 @@ impl Render for StageView {
             })
             .collect();
 
+        let slides = self.slides();
         let title = self
-            .rundown
+            .document
             .as_ref()
-            .map_or_else(String::new, |(_, r)| r.title.clone());
-        let section = self
-            .show
-            .current()
+            .map_or_else(String::new, |d| d.rundown().title.clone());
+        let section = slides
+            .get(self.show.cursor())
             .and_then(|s| s.section.clone())
             .unwrap_or_default();
-        let position = (!self.show.slides().is_empty())
-            .then(|| format!("{} / {}", self.show.cursor() + 1, self.show.slides().len()));
+        let position =
+            (!slides.is_empty()).then(|| format!("{} / {}", self.show.cursor() + 1, slides.len()));
         let overflow_note = match self.overflowing().as_slice() {
             [] => None,
             [(i, _)] => Some(format!("Card {} doesn't fit", i + 1)),
@@ -594,8 +553,8 @@ impl Render for StageView {
                     .child(e.clone())
             }));
 
-        let empty = self.show.slides().is_empty().then(|| {
-            let hint = if self.rundown.is_some() {
+        let empty = slides.is_empty().then(|| {
+            let hint = if self.document.is_some() {
                 "This rundown has no cards."
             } else {
                 "Import a Markdown rundown with File > Import Markdown… (⌘O)."
