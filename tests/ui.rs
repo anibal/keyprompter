@@ -355,3 +355,186 @@ fn the_view_menu_checks_the_side_the_strip_is_stuck_to() {
         ]
     );
 }
+
+fn card_text(cx: &mut TestAppContext, view: &Entity<StageView>, index: usize) -> (String, String) {
+    cx.read_entity(view, |v, _| {
+        let card = v.document().unwrap().rundown().cards().nth(index).unwrap();
+        (card.cue.clone(), card.body.clone())
+    })
+}
+
+fn editing(cx: &mut TestAppContext, view: &Entity<StageView>) -> bool {
+    cx.read_entity(view, |v, _| v.editing())
+}
+
+fn strings(cue: &str, body: &str) -> (String, String) {
+    (cue.to_string(), body.to_string())
+}
+
+#[gpui_kit::test]
+async fn return_opens_the_card_and_cmd_return_saves_what_was_typed(cx: &mut TestAppContext) {
+    let (handle, view) = open(cx, "## a\nold\n## b\n");
+    press(cx, handle, "enter");
+    assert!(editing(cx, &view));
+    cx.simulate_keystrokes(handle, "x space y");
+    cx.simulate_keystrokes(handle, "enter");
+    cx.simulate_keystrokes(handle, "n e w space t e x t");
+    cx.simulate_keystrokes(handle, "cmd-enter");
+    assert!(!editing(cx, &view));
+    assert_eq!(card_text(cx, &view, 0), strings("ax y", "new textold"));
+    assert_eq!(
+        cx.read_entity(&view, |v, _| v.cursor()),
+        0,
+        "a space typed in a field is not Next"
+    );
+    press(cx, handle, "right");
+    assert_eq!(
+        cx.read_entity(&view, |v, _| v.cursor()),
+        1,
+        "keys navigate again"
+    );
+}
+
+#[gpui_kit::test]
+async fn escape_discards_the_edit(cx: &mut TestAppContext) {
+    let (handle, view) = open(cx, "## a\n## b\n");
+    act(cx, keyprompter::app::EditText);
+    cx.simulate_keystrokes(handle, "z");
+    press(cx, handle, "escape");
+    assert!(!editing(cx, &view));
+    assert_eq!(card_text(cx, &view, 0), strings("a", ""));
+    act(cx, keyprompter::app::Undo);
+    assert_eq!(card_text(cx, &view, 0), strings("a", ""));
+}
+
+#[gpui_kit::test]
+async fn a_saved_edit_is_one_undo_step_named_edit_card(cx: &mut TestAppContext) {
+    let (handle, view) = open(cx, "## a\nline\n## b\n");
+    press(cx, handle, "enter");
+    cx.simulate_keystrokes(handle, "b a c k space e n d");
+    cx.simulate_keystrokes(handle, "enter");
+    cx.simulate_keystrokes(handle, "x");
+    cx.simulate_keystrokes(handle, "cmd-enter");
+    assert_eq!(card_text(cx, &view, 0), strings("aback end", "xline"));
+    let label = cx.read_entity(&view, |v, _| v.document().unwrap().undo_label());
+    assert_eq!(label, Some("Edit Card"));
+    act(cx, keyprompter::app::Undo);
+    assert_eq!(card_text(cx, &view, 0), strings("a", "line"));
+    act(cx, keyprompter::app::Redo);
+    assert_eq!(card_text(cx, &view, 0), strings("aback end", "xline"));
+}
+
+#[gpui_kit::test]
+async fn an_unchanged_or_empty_cue_records_no_step(cx: &mut TestAppContext) {
+    let (handle, view) = open(cx, "## a\n## b\n");
+    press(cx, handle, "enter");
+    press(cx, handle, "cmd-enter");
+    let undo =
+        |cx: &mut TestAppContext| cx.read_entity(&view, |v, _| v.document().unwrap().undo_label());
+    assert_eq!(undo(cx), None, "nothing changed");
+    press(cx, handle, "enter");
+    press(cx, handle, "backspace");
+    press(cx, handle, "cmd-enter");
+    assert!(!editing(cx, &view));
+    assert_eq!(
+        card_text(cx, &view, 0),
+        strings("a", ""),
+        "an empty cue reverts"
+    );
+    assert_eq!(undo(cx), None);
+}
+
+#[gpui_kit::test]
+async fn moving_the_strip_saves_the_edit_first(cx: &mut TestAppContext) {
+    let library = library();
+    let (handle, view) = open_in(cx, "## a\n## b\n", library.clone());
+    press(cx, handle, "enter");
+    cx.simulate_keystrokes(handle, "x");
+    act(cx, keyprompter::app::Next);
+    assert!(!editing(cx, &view));
+    assert_eq!(card_text(cx, &view, 0), strings("ax", ""));
+    assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 1);
+    assert_eq!(
+        library.load("test").unwrap().cards().next().unwrap().cue,
+        "ax",
+        "saved"
+    );
+}
+
+#[gpui_kit::test]
+async fn a_card_operation_saves_the_edit_first(cx: &mut TestAppContext) {
+    let (handle, view) = open(cx, "## a\n## b\n");
+    press(cx, handle, "enter");
+    cx.simulate_keystrokes(handle, "x");
+    act(cx, keyprompter::app::EditCard::Duplicate);
+    assert!(!editing(cx, &view));
+    assert_eq!(cues(cx, &view), ["ax", "ax", "b"]);
+}
+
+#[gpui_kit::test]
+async fn undo_while_editing_goes_to_the_field_not_the_cards(cx: &mut TestAppContext) {
+    let (handle, view) = open(cx, "## a\n## b\n");
+    act(cx, keyprompter::app::EditCard::Duplicate);
+    act(cx, keyprompter::app::EditText);
+    cx.simulate_keystrokes(handle, "x y");
+    act(cx, keyprompter::app::Undo);
+    assert_eq!(cues(cx, &view), ["a", "a", "b"], "the duplicate stays");
+    assert!(editing(cx, &view));
+    press(cx, handle, "cmd-enter");
+    assert_eq!(cues(cx, &view), ["a", "a", "b"]);
+}
+
+#[gpui_kit::test]
+async fn double_clicking_the_current_card_edits_it_and_another_card_only_centers(
+    cx: &mut TestAppContext,
+) {
+    let (handle, view) = open(cx, "## a\n## b\n## c\n");
+    let mut cx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    let next_card = gpui_kit::point(px(942.), px(75.));
+    cx.simulate_event(gpui_kit::MouseDownEvent {
+        position: next_card,
+        button: gpui_kit::MouseButton::Left,
+        modifiers: Default::default(),
+        click_count: 2,
+        first_mouse: false,
+    });
+    cx.run_until_parked();
+    assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 1);
+    assert!(!cx.read_entity(&view, |v, _| v.editing()));
+    cx.simulate_event(gpui_kit::MouseDownEvent {
+        position: next_card,
+        button: gpui_kit::MouseButton::Left,
+        modifiers: Default::default(),
+        click_count: 2,
+        first_mouse: false,
+    });
+    cx.run_until_parked();
+    assert!(cx.read_entity(&view, |v, _| v.editing()));
+}
+
+#[gpui_kit::test]
+async fn arrows_cross_between_the_fields_and_return_in_the_body_adds_a_line(
+    cx: &mut TestAppContext,
+) {
+    let (handle, view) = open(cx, "## a\nl1\n## b\n");
+    press(cx, handle, "enter");
+    press(cx, handle, "down");
+    cx.simulate_keystrokes(handle, "x enter y");
+    assert!(editing(cx, &view), "plain Return in the body does not save");
+    press(cx, handle, "up");
+    press(cx, handle, "up");
+    cx.simulate_keystrokes(handle, "z");
+    press(cx, handle, "cmd-enter");
+    assert_eq!(card_text(cx, &view, 0), strings("az", "x\nyl1"));
+}
+
+#[gpui_kit::test]
+async fn pressing_inside_the_fields_keeps_editing(cx: &mut TestAppContext) {
+    let (handle, view) = open(cx, "## a\n## b\n");
+    press(cx, handle, "enter");
+    let mut cx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    cx.simulate_click(gpui_kit::point(px(450.), px(30.)), Default::default());
+    cx.simulate_click(gpui_kit::point(px(450.), px(100.)), Default::default());
+    cx.run_until_parked();
+    assert!(cx.read_entity(&view, |v, _| v.editing()));
+}

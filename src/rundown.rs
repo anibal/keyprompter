@@ -132,7 +132,7 @@ pub enum Side {
 }
 
 /// A change to one card, named by id so it stays valid across other edits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Edit {
     /// A copy goes right next to the card, on the given side.
     Duplicate(CardId, Side),
@@ -144,14 +144,17 @@ pub enum Edit {
     MoveAfter(CardId),
     /// Refused for the only card, so there is always one to edit.
     Delete(CardId),
+    /// Replaces the cue and the body, both trimmed. Refused for an empty cue.
+    SetText(CardId, String, String),
 }
 
 impl Rundown {
+    pub fn cards(&self) -> impl Iterator<Item = &Card> {
+        self.sections.iter().flat_map(|s| &s.cards)
+    }
+
     pub fn card_ids(&self) -> Vec<CardId> {
-        self.sections
-            .iter()
-            .flat_map(|s| s.cards.iter().map(|c| c.id))
-            .collect()
+        self.cards().map(|c| c.id).collect()
     }
 
     fn position(&self, id: CardId) -> Option<(usize, usize)> {
@@ -242,6 +245,17 @@ impl Rundown {
                 let (s, c) = self.position(id)?;
                 self.sections[s].cards.remove(c);
                 focus
+            }
+            Edit::SetText(id, cue, body) => {
+                let (cue, body) = (cue.trim(), body.trim());
+                let (s, c) = self.position(id)?;
+                let card = &mut self.sections[s].cards[c];
+                if cue.is_empty() || (card.cue == cue && card.body == body) {
+                    return None;
+                }
+                card.cue = cue.to_string();
+                card.body = body.to_string();
+                id
             }
         };
         self.sections.retain(|section| !section.cards.is_empty());

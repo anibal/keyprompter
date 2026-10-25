@@ -9,7 +9,7 @@ use crate::{show::Command, view::StageView};
 
 /// System-wide shortcuts, so slides advance while OBS or a browser is frontmost.
 /// Carbon hotkeys need no Accessibility permission.
-pub fn listen(view: Entity<StageView>, cx: &mut App) {
+pub fn listen(window: AnyWindowHandle, view: Entity<StageView>, cx: &mut App) {
     let bindings = [
         (Code::ArrowRight, Command::Next),
         (Code::ArrowLeft, Command::Prev),
@@ -39,7 +39,11 @@ pub fn listen(view: Entity<StageView>, cx: &mut App) {
         let _registered = manager;
         while let Some(id) = pressed_rx.next().await {
             if let Some((_, cmd)) = bindings.iter().find(|(hotkey, _)| hotkey.id() == id) {
-                view.update(cx, |v, cx| v.command(*cmd, cx));
+                window
+                    .update(cx, |_, window, cx| {
+                        view.update(cx, |v, cx| v.command(*cmd, window, cx))
+                    })
+                    .ok();
             }
         }
     })
