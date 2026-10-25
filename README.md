@@ -53,3 +53,12 @@ Text before the first heading is ignored. Import reads this format and Export wr
 cargo fmt --check && cargo clippy --offline --all-targets -- -D warnings && cargo test --offline
 osascript -l JavaScript scripts/windows.js keyprompter   # on-screen windows, no Screen Recording permission needed
 ```
+
+To try the bundled app without touching your own settings or library, `scripts/try.sh` runs a second copy with `KEYPROMPTER_HOME` set to `target/try-home`. That copy also takes action names, the ones the menus run, from a `drive` pipe in that folder.
+
+```sh
+scripts/try.sh start examples/stream.md
+scripts/try.sh send Next DuplicateCard Undo
+scripts/try.sh shot strip.png    # fails while the strip is hidden from capture
+scripts/try.sh stop
+```

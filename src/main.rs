@@ -1,4 +1,9 @@
-use std::path::PathBuf;
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    os::unix::fs::FileTypeExt,
+    path::PathBuf,
+};
 
 use futures::{StreamExt, channel::mpsc};
 use gpui_kit::*;
@@ -11,10 +16,24 @@ use keyprompter::{
 
 const DEFAULT_H: f32 = 150.0;
 
+/// Points KeyPrompter at another settings and library folder. A test run there
+/// also reads action names, such as `Next`, line by line from its `drive` pipe.
+const TEST_HOME: &str = "KEYPROMPTER_HOME";
+
+enum Request {
+    Import(PathBuf),
+    Action(String),
+}
+
 fn main() {
-    let state_path = state::path();
+    let test_home = std::env::var_os(TEST_HOME).map(PathBuf::from);
+    let drive = test_home.as_ref().map(|home| home.join("drive"));
+    let home = test_home
+        .or_else(|| Some(dirs::config_dir()?.join("KeyPrompter")))
+        .expect("Application Support folder");
+    let state_path = Some(home.join("state.txt"));
     let saved = state_path.as_deref().map(state::load).unwrap_or_default();
-    let library = Library::new(Library::default_dir().expect("Application Support folder"));
+    let library = Library::new(home.join("Rundowns"));
     let argument = std::env::args_os()
         .nth(1)
         .map(|arg| std::path::absolute(&arg).unwrap_or_else(|_| PathBuf::from(arg)));
@@ -26,17 +45,27 @@ fn main() {
         _ => (None, None),
     };
 
-    let (opened_tx, mut opened_rx) = mpsc::unbounded();
+    let (requests_tx, mut requests_rx) = mpsc::unbounded();
     if let Some(path) = argument {
-        opened_tx.unbounded_send(path).ok();
+        requests_tx.unbounded_send(Request::Import(path)).ok();
     }
     let application = application();
+    if let Some(pipe) = drive.filter(|p| p.metadata().is_ok_and(|m| m.file_type().is_fifo())) {
+        let requests_tx = requests_tx.clone();
+        std::thread::spawn(move || {
+            while let Ok(file) = File::open(&pipe) {
+                for name in BufReader::new(file).lines().map_while(Result::ok) {
+                    requests_tx.unbounded_send(Request::Action(name)).ok();
+                }
+            }
+        });
+    }
     application.on_open_urls(move |urls| {
         for path in urls
             .iter()
             .filter_map(|u| url::Url::parse(u).ok()?.to_file_path().ok())
         {
-            opened_tx.unbounded_send(path).ok();
+            requests_tx.unbounded_send(Request::Import(path)).ok();
         }
     });
 
@@ -78,8 +107,16 @@ fn main() {
         }
         hotkeys::listen(view.clone(), cx);
         cx.spawn(async move |cx| {
-            while let Some(path) = opened_rx.next().await {
-                cx.update(|cx| app::open_markdown(window, &view, &library, &path, cx));
+            while let Some(request) = requests_rx.next().await {
+                cx.update(|cx| match request {
+                    Request::Import(path) => app::open_markdown(window, &view, &library, &path, cx),
+                    Request::Action(name) => {
+                        match cx.build_action(&format!("keyprompter::{name}"), None) {
+                            Ok(action) => cx.dispatch_action(&*action),
+                            Err(e) => view.update(cx, |v, cx| v.show_error(e.to_string(), cx)),
+                        }
+                    }
+                });
             }
         })
         .detach();

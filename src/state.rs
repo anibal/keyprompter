@@ -1,7 +1,4 @@
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
-};
+use std::{fs, io, path::Path};
 
 /// Window rectangle in screen points, written as `x y w h`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -76,10 +73,6 @@ impl State {
         }
         out
     }
-}
-
-pub fn path() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("KeyPrompter").join("state.txt"))
 }
 
 pub fn load(path: &Path) -> State {

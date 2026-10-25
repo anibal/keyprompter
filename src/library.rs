@@ -24,10 +24,6 @@ impl Library {
         Self { dir }
     }
 
-    pub fn default_dir() -> Option<PathBuf> {
-        Some(dirs::config_dir()?.join("KeyPrompter").join("Rundowns"))
-    }
-
     fn path(&self, id: &str) -> PathBuf {
         self.dir.join(format!("{id}.json"))
     }
