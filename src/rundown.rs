@@ -149,11 +149,12 @@ pub enum Edit {
 }
 
 impl Rundown {
+    pub fn cards(&self) -> impl Iterator<Item = &Card> {
+        self.sections.iter().flat_map(|s| &s.cards)
+    }
+
     pub fn card_ids(&self) -> Vec<CardId> {
-        self.sections
-            .iter()
-            .flat_map(|s| s.cards.iter().map(|c| c.id))
-            .collect()
+        self.cards().map(|c| c.id).collect()
     }
 
     fn position(&self, id: CardId) -> Option<(usize, usize)> {

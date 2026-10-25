@@ -3,17 +3,23 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use gpui_kit::*;
+use gpui_kit::{
+    component::{
+        Sizable,
+        input::{self as text, Input, InputEvent, InputState, Textarea, TextareaState},
+    },
+    *,
+};
 
 use crate::{
-    app::{self, CARD_MENU, EditCard},
+    app::{self, CARD_MENU, CancelEdit, CardItem, EditCard},
     deck::{Slide, Span},
     document::Document,
     layout::{self, CardLayout, LINE_HEIGHT, Mark, TypeScale},
     library::Library,
     motion::{Before, Motion},
     platform,
-    rundown::Rundown,
+    rundown::{CardId, Edit, Rundown},
     show::{Command, Show, format_elapsed},
     snap::{self, Drag, Edge, Gesture, Lean, Placement, Rect, Side, Stick, Widths},
     stage::{ease, slot},
@@ -58,6 +64,11 @@ fn theme(appearance: WindowAppearance) -> Theme {
     }
 }
 
+enum Field {
+    Cue,
+    Body,
+}
+
 /// The open rundown was replaced or changed, so its undo state may differ.
 pub struct DocumentChanged;
 
@@ -67,6 +78,14 @@ impl EventEmitter<DocumentChanged> for StageView {}
 pub struct PlacementChanged;
 
 impl EventEmitter<PlacementChanged> for StageView {}
+
+/// A card whose text is open for editing, in two fields styled like the card.
+struct Editing {
+    card: CardId,
+    cue: Entity<InputState>,
+    body: Entity<TextareaState>,
+    _subscriptions: [Subscription; 2],
+}
 
 pub struct StageView {
     focus: FocusHandle,
@@ -87,6 +106,7 @@ pub struct StageView {
     /// What `layouts` were laid out for. `None` once the deck has changed.
     layout_key: Option<(TypeScale, f32)>,
     content_h: f32,
+    editing: Option<Editing>,
     /// The gesture in flight. While one lives it owns the frame.
     drag: Option<Drag>,
     /// Moves `place` has queued that haven't landed yet.
@@ -110,7 +130,15 @@ impl StageView {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         let subscriptions = [
-            cx.observe_window_activation(window, |this, window, cx| window.focus(&this.focus, cx)),
+            cx.observe_window_activation(window, |this, window, cx| {
+                // An open edit keeps the focus while the window is active and
+                // is saved when it is not.
+                if window.is_window_active() && this.editing.is_some() {
+                    return;
+                }
+                this.finish(true, window, cx);
+                window.focus(&this.focus, cx);
+            }),
             cx.observe_window_appearance(window, |_, _, cx| cx.notify()),
             cx.observe_window_bounds(window, |this, window, cx| this.moved(window, cx)),
         ];
@@ -138,6 +166,7 @@ impl StageView {
             layouts: Vec::new(),
             motion: Motion::default(),
             menu_target: None,
+            editing: None,
             layout_key: None,
             content_h: 0.0,
             saved,
@@ -225,7 +254,14 @@ impl StageView {
     }
 
     /// Switches to another rundown, starting it from the first slide.
-    pub fn open(&mut self, id: String, rundown: Rundown, window: &Window, cx: &mut Context<Self>) {
+    pub fn open(
+        &mut self,
+        id: String,
+        rundown: Rundown,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.finish(true, window, cx);
         self.document = Some(Document::new(id, rundown));
         self.show = Show::default();
         self.motion.clear();
@@ -238,25 +274,173 @@ impl StageView {
     }
 
     /// Applies a card command to the card in the hot spot.
-    pub fn edit(&mut self, op: EditCard, cx: &mut Context<Self>) {
-        self.edit_at(self.show.cursor(), op, cx);
+    pub fn edit(&mut self, op: EditCard, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_at(self.show.cursor(), op, window, cx);
     }
 
-    /// Applies a card command to the card at `target`. The hot spot stays on
-    /// its card unless that card is the one changed.
-    pub fn edit_at(&mut self, target: usize, op: EditCard, cx: &mut Context<Self>) {
+    /// Applies a card command to the card at `target`, after saving any text
+    /// edit. The hot spot stays on its card unless that card is the one changed.
+    pub fn edit_at(
+        &mut self,
+        target: usize,
+        op: EditCard,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.finish(true, window, cx);
         self.change(
             |d, at| d.edit(at, target, op.title(), |card, side| op.edit(card, side)),
             cx,
         );
     }
 
-    pub fn undo(&mut self, cx: &mut Context<Self>) {
-        self.change(Document::undo, cx);
+    /// While a card's text is open, Undo and Redo belong to the focused field.
+    /// A card change reverted from under an open edit would leave it editing
+    /// a card that is gone or different.
+    pub fn undo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing.is_some() {
+            window.dispatch_action(text::Undo.boxed_clone(), cx);
+        } else {
+            self.change(Document::undo, cx);
+        }
     }
 
-    pub fn redo(&mut self, cx: &mut Context<Self>) {
-        self.change(Document::redo, cx);
+    pub fn redo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing.is_some() {
+            window.dispatch_action(text::Redo.boxed_clone(), cx);
+        } else {
+            self.change(Document::redo, cx);
+        }
+    }
+
+    pub fn editing(&self) -> bool {
+        self.editing.is_some()
+    }
+
+    /// Opens the card in the hot spot for editing.
+    pub fn begin_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing.is_some() {
+            return;
+        }
+        let Some(card) = self
+            .document
+            .as_ref()
+            .and_then(|d| d.rundown().cards().nth(self.show.cursor()))
+        else {
+            return;
+        };
+        let (id, cue_text, body_text) = (card.id, card.cue.clone(), card.body.clone());
+        let cue = cx.new(|cx| InputState::new(window, cx));
+        let body = cx.new(|cx| TextareaState::new(window, cx));
+        cue.update(cx, |state, cx| {
+            state.set_value(cue_text, window, cx);
+            state.focus(window, cx);
+        });
+        body.update(cx, |state, cx| state.set_value(body_text, window, cx));
+        let subscriptions = [
+            cx.subscribe_in(
+                &cue,
+                window,
+                |this, _, event: &InputEvent, window, cx| match event {
+                    InputEvent::PressEnter {
+                        secondary: false, ..
+                    } => this.focus_field(Field::Body, window, cx),
+                    InputEvent::Blur => this.lost_focus(window, cx),
+                    _ => {}
+                },
+            ),
+            cx.subscribe_in(&body, window, |this, _, event: &InputEvent, window, cx| {
+                if let InputEvent::Blur = event {
+                    this.lost_focus(window, cx);
+                }
+            }),
+        ];
+        self.editing = Some(Editing {
+            card: id,
+            cue,
+            body,
+            _subscriptions: subscriptions,
+        });
+        cx.emit(DocumentChanged);
+        cx.notify();
+    }
+
+    /// Brings the card at `index` to the middle and opens it for editing.
+    fn edit_text_at(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.command(Command::Goto(index), window, cx);
+        self.begin_edit(window, cx);
+    }
+
+    /// The one way out of editing: saves the fields as a single undo step or
+    /// drops them, and hands the focus back to the strip. An empty cue is not
+    /// a card, so it reverts.
+    fn finish(&mut self, save: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editing) = self.editing.take() else {
+            return;
+        };
+        window.focus(&self.focus, cx);
+        let cue = editing.cue.read(cx).value().to_string();
+        let body = editing.body.read(cx).value().to_string();
+        let target = self.document.as_ref().and_then(|d| {
+            d.rundown()
+                .card_ids()
+                .iter()
+                .position(|&i| i == editing.card)
+        });
+        if let (true, Some(target)) = (save && !cue.trim().is_empty(), target) {
+            let card = editing.card;
+            self.change(
+                |d, at| {
+                    d.edit(at, target, "Edit Card", |_, _| {
+                        Edit::SetText(card, cue, body)
+                    })
+                },
+                cx,
+            );
+        }
+        cx.emit(DocumentChanged);
+        cx.notify();
+    }
+
+    fn focus_field(&mut self, field: Field, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editing) = &self.editing else {
+            return;
+        };
+        match field {
+            Field::Cue => editing.cue.update(cx, |s, cx| s.focus(window, cx)),
+            Field::Body => editing.body.update(cx, |s, cx| s.focus(window, cx)),
+        }
+    }
+
+    /// A field lost the focus. Moving between the two fields is not leaving.
+    fn lost_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The field is mid-update here, so the edit can't be dropped yet.
+        cx.defer_in(window, |this, window, cx| {
+            let Some(editing) = &this.editing else {
+                return;
+            };
+            let inside = editing.cue.focus_handle(cx).is_focused(window)
+                || editing.body.focus_handle(cx).is_focused(window);
+            if !inside || !window.is_window_active() {
+                this.finish(true, window, cx);
+            }
+        });
+    }
+
+    /// Moves between the fields with the arrow keys when the caret is at the
+    /// edge of its field. `true` when it did.
+    fn cross(&mut self, down: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(editing) = &self.editing else {
+            return false;
+        };
+        let in_cue = editing.cue.focus_handle(cx).is_focused(window);
+        let to = match (in_cue, down) {
+            (true, true) => Field::Body,
+            (false, false) if editing.body.read(cx).cursor_position().line == 0 => Field::Cue,
+            _ => return false,
+        };
+        self.focus_field(to, window, cx);
+        true
     }
 
     /// Applies `change` at the current card, animates from the old deck to the
@@ -318,7 +502,7 @@ impl StageView {
             .save(document.id(), document.rundown())
             .err()
             .map(|e| format!("Can't save: {e}"));
-        self.command(Command::Goto(focus), cx);
+        self.go(Command::Goto(focus), cx);
         self.layout_key = None;
         cx.emit(DocumentChanged);
     }
@@ -339,17 +523,18 @@ impl StageView {
         cx.notify();
         let titles: Vec<_> = CARD_MENU
             .iter()
-            .map(|item| item.map(EditCard::title))
+            .map(|item| item.map(CardItem::title))
             .collect();
         // A spawned task runs outside any GPUI update, which the menu's own
         // event loop needs.
         cx.spawn_in(window, async move |this, cx| {
             let chosen =
                 platform::context_menu(&ns_view, &titles, (f32::from(at.x), f32::from(at.y)));
-            this.update(cx, |v, cx| {
+            this.update_in(cx, |v, window, cx| {
                 v.menu_target = None;
                 match chosen.and_then(|i| CARD_MENU[i]) {
-                    Some(op) => v.edit_at(index, op, cx),
+                    Some(CardItem::EditText) => v.edit_text_at(index, window, cx),
+                    Some(CardItem::Op(op)) => v.edit_at(index, op, window, cx),
                     None => cx.notify(),
                 }
             })
@@ -552,7 +737,13 @@ impl StageView {
         .detach();
     }
 
-    pub fn command(&mut self, cmd: Command, cx: &mut Context<Self>) {
+    /// Moves the strip, after saving any text edit.
+    pub fn command(&mut self, cmd: Command, window: &mut Window, cx: &mut Context<Self>) {
+        self.finish(true, window, cx);
+        self.go(cmd, cx);
+    }
+
+    fn go(&mut self, cmd: Command, cx: &mut Context<Self>) {
         self.show.apply(cmd, self.slides().len(), Instant::now());
         cx.notify();
     }
@@ -595,14 +786,10 @@ struct Appearance {
     marked: bool,
 }
 
-/// A card at its slot, or `None` when it is off the strip or invisible.
-fn card(
-    g: &Geometry,
-    layout: &CardLayout,
-    look: Appearance,
-    t: &Theme,
-    window: &Window,
-) -> Option<Div> {
+/// A card's place on the strip and its frame, before its content. Also the
+/// size it is drawn at and its height, or `None` when it is off the strip or
+/// invisible.
+fn frame(g: &Geometry, look: &Appearance, t: &Theme) -> Option<(Div, f32, f32)> {
     let s = slot(look.d);
     let size = s.scale * look.shrink;
     let opacity = s.opacity * look.opacity;
@@ -611,6 +798,38 @@ fn card(
     if opacity <= 0.0 || center + w / 2.0 < 0.0 || center - w / 2.0 > g.stage_w {
         return None;
     }
+    let frame = div()
+        .absolute()
+        .left(px(center - w / 2.0))
+        .top(px((g.win_h - h) / 2.0))
+        .w(px(w))
+        .h(px(h))
+        .p(px(CARD_PAD * size))
+        .overflow_hidden()
+        .rounded(px(10.0 * size))
+        .border_2()
+        .border_color(t.accent.opacity(if look.marked {
+            1.0
+        } else {
+            (1.0 - look.d.abs()).max(0.0)
+        }))
+        .bg(t.card)
+        .opacity(opacity)
+        .text_color(t.fg)
+        .flex()
+        .flex_col();
+    Some((frame, size, h))
+}
+
+/// A card at its slot, or `None` when it is off the strip or invisible.
+fn card(
+    g: &Geometry,
+    layout: &CardLayout,
+    look: Appearance,
+    t: &Theme,
+    window: &Window,
+) -> Option<Div> {
+    let (frame, size, _) = frame(g, &look, t)?;
     let scale = g.scale;
     let cue_h = scale.cue * LINE_HEIGHT * size;
     let body_h = scale.body * LINE_HEIGHT * size;
@@ -667,30 +886,43 @@ fn card(
                     .child(format!("+{} lines", fit.hidden)),
             )
     });
+    Some(frame.children(cue).children(body).children(more))
+}
+
+/// The card in the hot spot while its text is edited: the same frame, with
+/// the cue and the body as fields in the sizes the rendered card uses. A body
+/// taller than the card scrolls inside it.
+fn editor(g: &Geometry, editing: &Editing, look: Appearance, t: &Theme) -> Option<Div> {
+    let (frame, size, h) = frame(g, &look, t)?;
+    let scale = g.scale;
+    let cue_h = scale.cue * LINE_HEIGHT * size;
+    let body_h = scale.body * LINE_HEIGHT * size;
+    let body_area = h - 2.0 * (2.0 + CARD_PAD * size) - cue_h;
+    // The fields inset their text by this much; the card's own text is not inset.
+    let inset = px(4.0);
+    let cue = Input::new(&editing.cue)
+        .xsmall()
+        .appearance(false)
+        .bordered(false)
+        .focus_bordered(false);
+    let cue = Styled::h(cue, px(cue_h))
+        .p_0()
+        .text_size(px(scale.cue * size))
+        .line_height(px(cue_h))
+        .font_weight(FontWeight::BOLD)
+        .text_color(t.fg);
+    let body = Textarea::new(&editing.body)
+        .xsmall()
+        .appearance(false)
+        .bordered(false)
+        .h(px(body_area))
+        .text_size(px(scale.body * size))
+        .line_height(px(body_h))
+        .text_color(t.fg);
     Some(
-        div()
-            .absolute()
-            .left(px(center - w / 2.0))
-            .top(px((g.win_h - h) / 2.0))
-            .w(px(w))
-            .h(px(h))
-            .p(px(CARD_PAD * size))
-            .overflow_hidden()
-            .rounded(px(10.0 * size))
-            .border_2()
-            .border_color(t.accent.opacity(if look.marked {
-                1.0
-            } else {
-                (1.0 - look.d.abs()).max(0.0)
-            }))
-            .bg(t.card)
-            .opacity(opacity)
-            .text_color(t.fg)
-            .flex()
-            .flex_col()
-            .children(cue)
-            .children(body)
-            .children(more),
+        frame
+            .child(div().h(px(cue_h)).flex_none().child(cue))
+            .child(div().h(px(body_area)).flex_none().mx(-inset).child(body)),
     )
 }
 
@@ -837,26 +1069,39 @@ impl Render for StageView {
                     glow: (motion.glow_from, motion.glow),
                     marked: self.menu_target == Some(i),
                 };
-                let element = card(&geometry, layout, look, &t, window)?
-                    .id(("slide", i))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, _, cx| {
-                            // The current card lets the press through to
-                            // the strip, which drags the window.
-                            if i != this.show.cursor() {
-                                cx.stop_propagation();
-                                cx.activate(true);
-                                this.command(Command::Goto(i), cx);
-                            }
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                let open = self.editing.as_ref().filter(|e| e.card == slide.id);
+                let element = match open {
+                    Some(editing) => editor(&geometry, editing, look, &t),
+                    None => card(&geometry, layout, look, &t, window),
+                }?
+                .id(("slide", i))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                        if i != this.show.cursor() {
+                            cx.stop_propagation();
+                            cx.activate(true);
+                            this.command(Command::Goto(i), window, cx);
+                        } else if this.editing.is_some() {
+                            cx.stop_propagation();
+                        } else if e.click_count == 2 {
+                            cx.stop_propagation();
+                            this.begin_edit(window, cx);
+                        }
+                        // Otherwise the current card lets the press through to
+                        // the strip, which drags the window.
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                        if this.editing.is_some() && i == this.show.cursor() {
+                            cx.stop_propagation();
+                        } else {
                             this.card_menu(i, e.position, window, cx)
-                        }),
-                    );
+                        }
+                    }),
+                );
                 Some(element.into_any_element())
             });
         // Once a gesture has moved the strip, the cards are hidden and the
@@ -957,8 +1202,32 @@ impl Render for StageView {
 
         div()
             .id("root")
-            .key_context(app::STRIP)
+            .key_context(if self.editing.is_some() {
+                app::EDITING
+            } else {
+                app::STRIP
+            })
             .track_focus(&self.focus)
+            .on_action(
+                cx.listener(|this, _: &CancelEdit, window, cx| this.finish(false, window, cx)),
+            )
+            // Capture, because a multi-line field takes Enter for itself.
+            .capture_action(cx.listener(|this, e: &text::Enter, window, cx| {
+                if e.secondary && this.editing.is_some() {
+                    cx.stop_propagation();
+                    this.finish(true, window, cx);
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &text::MoveDown, window, cx| {
+                if this.cross(true, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &text::MoveUp, window, cx| {
+                if this.cross(false, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             // The strip is a non-activating panel, so a click alone would leave the
             // previous app's menu bar showing.
             .on_mouse_down(

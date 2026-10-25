@@ -36,7 +36,9 @@ actions!(
         Quit,
         Hide,
         HideOthers,
-        ShowAll
+        ShowAll,
+        EditText,
+        CancelEdit
     ]
 );
 
@@ -51,16 +53,41 @@ pub enum EditCard {
     Delete,
 }
 
+/// What the Card menu and the right-click menu offer for a card.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum CardItem {
+    EditText,
+    Op(EditCard),
+}
+
 /// Both card menus in order; `None` is a separator.
-pub const CARD_MENU: &[Option<EditCard>] = &[
-    Some(EditCard::Duplicate),
-    Some(EditCard::MergeWithNext),
+pub const CARD_MENU: &[Option<CardItem>] = &[
+    Some(CardItem::EditText),
     None,
-    Some(EditCard::MoveBefore),
-    Some(EditCard::MoveAfter),
+    Some(CardItem::Op(EditCard::Duplicate)),
+    Some(CardItem::Op(EditCard::MergeWithNext)),
     None,
-    Some(EditCard::Delete),
+    Some(CardItem::Op(EditCard::MoveBefore)),
+    Some(CardItem::Op(EditCard::MoveAfter)),
+    None,
+    Some(CardItem::Op(EditCard::Delete)),
 ];
+
+impl CardItem {
+    pub fn title(self) -> &'static str {
+        match self {
+            CardItem::EditText => "Edit Card",
+            CardItem::Op(op) => op.title(),
+        }
+    }
+
+    fn menu_item(self) -> MenuItem {
+        match self {
+            CardItem::EditText => MenuItem::action(self.title(), EditText),
+            CardItem::Op(op) => MenuItem::action(self.title(), op),
+        }
+    }
+}
 
 impl EditCard {
     pub fn title(self) -> &'static str {
@@ -115,6 +142,11 @@ pub struct SetFrame(pub [f32; 4]);
 /// field's own bindings for the same keys win inside the field.
 pub const STRIP: &str = "Strip";
 
+/// Key context of the strip while a card's text is being edited. It replaces
+/// `STRIP` instead of adding to it, so no navigation binding, Space above all,
+/// is left on the path to a text field.
+pub const EDITING: &str = "Editing";
+
 /// The first binding of each action is the one its menu item shows.
 pub fn key_bindings() -> Vec<KeyBinding> {
     vec![
@@ -128,6 +160,9 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("backspace", Prev, Some(STRIP)),
         KeyBinding::new("home", First, Some(STRIP)),
         KeyBinding::new("end", Last, Some(STRIP)),
+        KeyBinding::new("cmd-e", EditText, Some(STRIP)),
+        KeyBinding::new("enter", EditText, Some(STRIP)),
+        KeyBinding::new("escape", CancelEdit, Some(EDITING)),
         KeyBinding::new("cmd-o", Import, None),
         KeyBinding::new("cmd-z", Undo, Some(STRIP)),
         KeyBinding::new("shift-cmd-z", Redo, Some(STRIP)),
@@ -242,9 +277,7 @@ pub fn menus(
             name: "Card".into(),
             items: CARD_MENU
                 .iter()
-                .map(|item| {
-                    item.map_or(MenuItem::separator(), |op| MenuItem::action(op.title(), op))
-                })
+                .map(|item| item.map_or(MenuItem::separator(), CardItem::menu_item))
                 .collect(),
             disabled: false,
         },
@@ -287,26 +320,52 @@ pub fn init(cx: &mut App) {
 /// menu items reach only those, because GPUI's active-window lookup skips
 /// panels and the strip is a panel.
 pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Library, cx: &mut App) {
-    fn route<A: Action>(view: &Entity<StageView>, cmd: Command, cx: &mut App) {
+    // A key press reaches these listeners while the window is mid-dispatch, so
+    // the window update waits until the dispatch is over.
+    fn on_view<A: Action>(
+        window: AnyWindowHandle,
+        view: &Entity<StageView>,
+        cx: &mut App,
+        act: impl Fn(&mut StageView, &A, &mut Window, &mut Context<StageView>) + Clone + 'static,
+    ) {
         let view = view.clone();
-        cx.on_action(move |_: &A, cx| view.update(cx, |v, cx| v.command(cmd, cx)));
+        cx.on_action(move |action: &A, cx| {
+            let (view, action, act) = (view.clone(), action.boxed_clone(), act.clone());
+            cx.defer(move |cx| {
+                let Some(action) = action.as_any().downcast_ref::<A>() else {
+                    return;
+                };
+                window
+                    .update(cx, |_, window, cx| {
+                        view.update(cx, |v, cx| act(v, action, window, cx))
+                    })
+                    .ok();
+            });
+        });
     }
-    route::<Next>(&view, Command::Next, cx);
-    route::<Prev>(&view, Command::Prev, cx);
-    route::<First>(&view, Command::First, cx);
-    route::<Last>(&view, Command::Last, cx);
-
-    cx.on_action({
-        let view = view.clone();
-        move |op: &EditCard, cx| view.update(cx, |v, cx| v.edit(*op, cx))
+    on_view(window, &view, cx, |v, _: &Next, window, cx| {
+        v.command(Command::Next, window, cx)
     });
-    cx.on_action({
-        let view = view.clone();
-        move |_: &Undo, cx| view.update(cx, |v, cx| v.undo(cx))
+    on_view(window, &view, cx, |v, _: &Prev, window, cx| {
+        v.command(Command::Prev, window, cx)
     });
-    cx.on_action({
-        let view = view.clone();
-        move |_: &Redo, cx| view.update(cx, |v, cx| v.redo(cx))
+    on_view(window, &view, cx, |v, _: &First, window, cx| {
+        v.command(Command::First, window, cx)
+    });
+    on_view(window, &view, cx, |v, _: &Last, window, cx| {
+        v.command(Command::Last, window, cx)
+    });
+    on_view(window, &view, cx, |v, op: &EditCard, window, cx| {
+        v.edit(*op, window, cx)
+    });
+    on_view(window, &view, cx, |v, _: &EditText, window, cx| {
+        v.begin_edit(window, cx)
+    });
+    on_view(window, &view, cx, |v, _: &Undo, window, cx| {
+        v.undo(window, cx)
+    });
+    on_view(window, &view, cx, |v, _: &Redo, window, cx| {
+        v.redo(window, cx)
     });
 
     cx.on_action({
@@ -474,12 +533,18 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
 /// and the library.
 fn refresh_menus(view: &Entity<StageView>, library: &Library, cx: &mut App) {
     let view = view.read(cx);
-    let undo = view
-        .document()
-        .map_or_else(UndoState::default, |d| UndoState {
-            undo: d.undo_label(),
-            redo: d.redo_label(),
-        });
+    let undo = if view.editing() {
+        UndoState {
+            undo: Some("Typing"),
+            redo: Some("Typing"),
+        }
+    } else {
+        view.document()
+            .map_or_else(UndoState::default, |d| UndoState {
+                undo: d.undo_label(),
+                redo: d.redo_label(),
+            })
+    };
     cx.set_menus(menus(
         view.capture(),
         &platform::screen_names(),

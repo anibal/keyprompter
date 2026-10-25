@@ -102,7 +102,7 @@ fn main() {
         if let Some(error) = restore_error {
             view.update(cx, |v, cx| v.show_error(error, cx));
         }
-        hotkeys::listen(view.clone(), cx);
+        hotkeys::listen(window, view.clone(), cx);
         cx.spawn(async move |cx| {
             while let Some(request) = requests_rx.next().await {
                 cx.update(|cx| match request {
