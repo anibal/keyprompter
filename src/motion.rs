@@ -24,6 +24,7 @@ pub struct Look {
 /// or slides into the card it was merged into.
 #[derive(Debug, Clone)]
 pub struct Ghost<T> {
+    pub id: CardId,
     pub card: T,
     pub rank: f32,
     pub into: Option<CardId>,
@@ -81,20 +82,36 @@ impl<T> Motion<T> {
             } else {
                 self.looks.remove(&old.id);
                 self.ghosts.push(Ghost {
+                    id: old.id,
                     card: old.card,
                     rank: look.rank,
                     into,
-                    fade: 1.0,
+                    fade: look.appear,
                 });
             }
         }
         for (index, &id) in after.iter().enumerate() {
-            self.looks.entry(id).or_insert(Look {
-                rank: index as f32,
-                appear: 0.0,
-                glow_from: 0,
-                glow: 0.0,
-            });
+            if self.looks.contains_key(&id) {
+                continue;
+            }
+            // A card brought back while it was still fading out carries on
+            // from there instead of showing twice.
+            let (rank, appear) = match self.ghosts.iter().position(|g| g.id == id) {
+                Some(i) => {
+                    let ghost = self.ghosts.remove(i);
+                    (ghost.rank, ghost.fade)
+                }
+                None => (index as f32, 0.0),
+            };
+            self.looks.insert(
+                id,
+                Look {
+                    rank,
+                    appear,
+                    glow_from: 0,
+                    glow: 0.0,
+                },
+            );
         }
     }
 
@@ -133,12 +150,12 @@ impl<T> Motion<T> {
         }
         for ghost in &mut self.ghosts {
             ghost.fade = (ghost.fade - dt / VANISH_SECS).max(0.0);
-            if let Some(target) = ghost.into.and_then(|id| ids.iter().position(|&i| i == id)) {
-                ghost.rank = if slide {
-                    ease(ghost.rank, target as f32, dt)
-                } else {
-                    target as f32
-                };
+            // Without sliding, a merged card fades where it was rather than
+            // over the text of the card that took it.
+            if slide
+                && let Some(target) = ghost.into.and_then(|id| ids.iter().position(|&i| i == id))
+            {
+                ghost.rank = ease(ghost.rank, target as f32, dt);
             }
         }
         self.ghosts.retain(|ghost| ghost.fade > 0.0);

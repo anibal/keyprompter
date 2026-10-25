@@ -82,3 +82,22 @@ fn without_sliding_cards_jump_but_still_fade() {
     assert_eq!(m.ghosts()[0].rank, 2.0);
     assert!(m.ghosts()[0].fade < 1.0);
 }
+
+#[test]
+fn a_card_brought_back_while_fading_out_carries_on_instead_of_showing_twice() {
+    let mut m = Motion::default();
+    m.change(before(&[A, B, C]), &[A, C], &[], None);
+    m.step(&[A, C], 0.05, true);
+    let fade = m.ghosts()[0].fade;
+    m.change(before(&[A, C]), &[A, B, C], &[], None);
+    assert!(m.ghosts().is_empty());
+    assert_eq!(m.look(B, 1).appear, fade);
+}
+
+#[test]
+fn without_sliding_a_merged_card_fades_where_it_was() {
+    let mut m = Motion::default();
+    m.change(before(&[A, B, C]), &[A, C], &[(A, 2)], Some(A));
+    m.step(&[A, C], 0.05, false);
+    assert_eq!(m.ghosts()[0].rank, 1.0);
+}

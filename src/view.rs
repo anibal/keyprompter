@@ -203,6 +203,7 @@ impl StageView {
         self.document = Some(Document::new(id, rundown));
         self.show = Show::default();
         self.motion.clear();
+        self.layouts.clear();
         self.layout_key = None;
         self.error = None;
         self.persist(window);
@@ -212,28 +213,21 @@ impl StageView {
 
     /// Applies an edit to the current card, saves, and shows the card it focuses.
     pub fn edit(&mut self, op: EditCard, cx: &mut Context<Self>) {
-        let merge = op == EditCard::MergeWithNext;
-        self.change(
-            merge,
-            |d, at| d.edit(at, op.title(), |card| op.edit(card)),
-            cx,
-        );
+        self.change(|d, at| d.edit(at, op.title(), |card| op.edit(card)), cx);
     }
 
     pub fn undo(&mut self, cx: &mut Context<Self>) {
-        self.change(false, Document::undo, cx);
+        self.change(Document::undo, cx);
     }
 
     pub fn redo(&mut self, cx: &mut Context<Self>) {
-        self.change(false, Document::redo, cx);
+        self.change(Document::redo, cx);
     }
 
     /// Applies `change` at the current card, animates from the old deck to the
-    /// new one, saves, and shows the card it focuses. With `merge`, cards that
-    /// go away slide into the current card.
+    /// new one, saves, and shows the card it focuses.
     fn change(
         &mut self,
-        merge: bool,
         change: impl FnOnce(&mut Document, usize) -> Option<usize>,
         cx: &mut Context<Self>,
     ) {
@@ -262,7 +256,11 @@ impl StageView {
                 }
             })
             .collect();
-        let into = merge.then(|| before.get(cursor).map(|s| s.id)).flatten();
+        // A merge, or its redo, removes a card and changes the one before it.
+        let into = before
+            .windows(2)
+            .find(|w| !ids.contains(&w[1].id) && changed.iter().any(|&(id, _)| id == w[0].id))
+            .map(|w| w[0].id);
         let mut layouts = layouts.into_iter();
         let before = before
             .iter()
