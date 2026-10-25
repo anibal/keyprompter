@@ -564,7 +564,12 @@ impl Render for StageView {
         div()
             .id("root")
             .track_focus(&self.focus)
-            .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+            // The strip is a non-activating panel, so a click alone would leave the
+            // previous app's menu bar showing.
+            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                cx.activate(true);
+                window.start_window_move();
+            })
             .size_full()
             .flex()
             .bg(t.bg)
