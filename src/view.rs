@@ -15,7 +15,7 @@ use crate::{
     platform,
     rundown::Rundown,
     show::{Command, Show, format_elapsed},
-    snap::{self, Drag, Gesture, Placement, Rect, Side, Widths},
+    snap::{self, Drag, Edge, Gesture, Lean, Placement, Rect, Side, Stick, Widths},
     stage::{ease, slot},
     state::{self, Capture, State},
 };
@@ -365,17 +365,37 @@ impl StageView {
         cx.notify();
     }
 
-    /// A left press on the strip starts a move.
-    fn press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// A left press starts a move, or on an edge zone a resize. A double-click
+    /// on an edge zone pushes that edge to the screen edge, and with Option,
+    /// or from a centered strip, takes the whole width.
+    fn press(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let Some(frame) = platform::frame(window) else {
             return;
         };
         let screens = platform::screens();
+        let Some(screen) = snap::holding(frame, &screens) else {
+            return;
+        };
         let Some(placement) = snap::classify(frame, &screens, Widths::default()) else {
             return;
         };
+        let stick = placement.stick;
+        let gesture = match snap::edge_at(f32::from(e.position.x), frame.w, stick) {
+            None => Gesture::Move,
+            Some(edge) if e.click_count == 2 => {
+                let whole = e.modifiers.alt || stick == Stick::Stuck(Side::Center);
+                let pushed = if whole {
+                    snap::full_width(frame, screen)
+                } else {
+                    snap::pushed(frame, edge, screen)
+                };
+                place(pushed, window, cx);
+                return;
+            }
+            Some(edge) => Gesture::Resize(edge),
+        };
         let at = platform::pointer().at;
-        self.drag = Some(Drag::start(Gesture::Move, frame, at, placement.stick));
+        self.drag = Some(Drag::start(gesture, frame, at, stick));
         // Polling, not GPUI mouse events, because `on_mouse_move` listeners
         // fire only while hovered and a fast drag leaves the window.
         self._drag_task = Some(cx.spawn_in(window, async move |this, cx| {
@@ -695,16 +715,62 @@ impl Render for StageView {
         let view = window.viewport_size();
         let (win_w, win_h) = (f32::from(view.width), f32::from(view.height));
         let stage_w = win_w - COLUMN_W;
-        let card_w = snap::card_width(win_w);
-        // Read live, so the current card holds still on screen while the
-        // window slides under it.
+        // Cards keep the width they had when a gesture began, so a live
+        // resize doesn't lay out every card per frame; they reflow on release.
+        let card_w = snap::card_width(self.drag.map_or(win_w, |d| d.grab.w));
+        // The frame is read live, so the current card holds still on screen
+        // while the window slides under it. Test windows have none.
         let screens = platform::screens();
-        let hot_x = platform::frame(window)
-            .and_then(|f| {
-                let screen = snap::holding(f, &screens)?.frame;
-                Some(snap::hot_spot(f, screen, COLUMN_W, card_w))
-            })
-            .unwrap_or(win_w / 2.0 - COLUMN_W);
+        let placed = platform::frame(window).and_then(|f| {
+            let screen = snap::holding(f, &screens)?;
+            let stick = snap::classify(f, &screens, Widths::default())?.stick;
+            Some((f, screen, stick))
+        });
+        let hot_x = placed.map_or(win_w / 2.0 - COLUMN_W, |(f, screen, _)| {
+            snap::hot_spot(f, screen.frame, COLUMN_W, card_w)
+        });
+        // The resize zones, on the edges that can be grabbed. Each takes the
+        // press itself, since a card under it would otherwise take it first.
+        let zones: Vec<_> = placed.map_or_else(Vec::new, |(f, screen, stick)| {
+            let symmetric = stick == Stick::Stuck(Side::Center);
+            [Edge::Left, Edge::Right]
+                .into_iter()
+                .filter_map(|edge| {
+                    let x = match edge {
+                        Edge::Left => 0.0,
+                        Edge::Right => f.w,
+                    };
+                    snap::edge_at(x, f.w, stick)?;
+                    let cursor = match (edge, snap::lean(edge, f, screen, symmetric)) {
+                        (_, Lean::Both) => CursorStyle::ResizeLeftRight,
+                        (Edge::Left, Lean::Outward) | (Edge::Right, Lean::Inward) => {
+                            CursorStyle::ResizeLeft
+                        }
+                        (Edge::Left, Lean::Inward) | (Edge::Right, Lean::Outward) => {
+                            CursorStyle::ResizeRight
+                        }
+                    };
+                    let zone = div()
+                        .absolute()
+                        .top_0()
+                        .h_full()
+                        .w(px(snap::EDGE_W))
+                        .cursor(cursor)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                                cx.stop_propagation();
+                                cx.activate(true);
+                                this.press(e, window, cx);
+                            }),
+                        );
+                    Some(match edge {
+                        Edge::Left => zone.left_0(),
+                        Edge::Right => zone.right_0(),
+                    })
+                })
+                .collect()
+        });
         let card_h = win_h - CARD_VPAD;
 
         let content_h = card_h - 2.0 * CARD_PAD;
@@ -871,9 +937,9 @@ impl Render for StageView {
             // previous app's menu bar showing.
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
+                cx.listener(|this, e, window, cx| {
                     cx.activate(true);
-                    this.press(window, cx);
+                    this.press(e, window, cx);
                 }),
             )
             .size_full()
@@ -890,5 +956,6 @@ impl Render for StageView {
                     .children(empty)
                     .children(cards),
             )
+            .children(zones)
     }
 }
