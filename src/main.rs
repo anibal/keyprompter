@@ -30,6 +30,9 @@ enum Request {
 
 fn main() {
     let test_home = std::env::var_os(TEST_HOME).map(PathBuf::from);
+    if let Some(home) = &test_home {
+        std::fs::write(home.join("pid"), std::process::id().to_string()).ok();
+    }
     let drive = test_home.as_ref().map(|home| home.join("drive"));
     let home = test_home
         .or_else(|| Some(dirs::config_dir()?.join("KeyPrompter")))
