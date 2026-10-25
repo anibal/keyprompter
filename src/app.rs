@@ -380,11 +380,13 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
             }
             match library.load(&action.id) {
                 Ok(rundown) => open(window, &view, action.id.clone(), rundown, cx),
-                Err(e) => view.update(cx, |v, cx| {
-                    v.show_error(format!("Can't open rundown {}: {e}", action.id), cx)
-                }),
+                Err(e) => {
+                    view.update(cx, |v, cx| {
+                        v.show_error(format!("Can't open rundown {}: {e}", action.id), cx)
+                    });
+                    refresh_menus(&view, &library, cx);
+                }
             }
-            refresh_menus(&view, &library, cx);
         }
     });
     cx.subscribe(&view, {
@@ -456,5 +458,4 @@ pub fn open_markdown(
             v.show_error(format!("Can't import {}: {e}", path.display()), cx)
         }),
     }
-    refresh_menus(view, library, cx);
 }
