@@ -35,11 +35,11 @@ actions!(
     ]
 );
 
-/// Opens the `index`-th rundown of the library list, most recent first.
+/// Opens a library rundown by id. Not by menu position: saving reorders the list.
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = keyprompter, no_json)]
 pub struct OpenRecent {
-    pub index: usize,
+    pub id: String,
 }
 
 /// Moves the strip to the top of the `index`-th screen, as `NSScreen` lists them.
@@ -91,9 +91,17 @@ pub fn menus(capture: Capture, screens: &[String], recent: &[Entry]) -> Vec<Menu
                     name: "Open Recent".into(),
                     items: recent
                         .iter()
-                        .enumerate()
-                        .map(|(index, entry)| {
-                            MenuItem::action(entry.title.clone(), OpenRecent { index })
+                        .map(|entry| {
+                            let title = entry
+                                .title
+                                .clone()
+                                .unwrap_or_else(|| format!("Unreadable rundown {}", entry.id));
+                            MenuItem::action(
+                                title,
+                                OpenRecent {
+                                    id: entry.id.clone(),
+                                },
+                            )
                         })
                         .collect(),
                     disabled: recent.is_empty(),
@@ -239,6 +247,7 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
         let view = view.clone();
         move |_: &Export, cx| {
             let Some((_, rundown)) = view.read(cx).rundown().cloned() else {
+                view.update(cx, |v, cx| v.show_error("No rundown to export".into(), cx));
                 return;
             };
             let dir = rundown
@@ -265,13 +274,17 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
     cx.on_action({
         let (view, library) = (view.clone(), library.clone());
         move |action: &OpenRecent, cx| {
-            let Some(entry) = library.list().into_iter().nth(action.index) else {
+            if view
+                .read(cx)
+                .rundown()
+                .is_some_and(|(id, _)| *id == action.id)
+            {
                 return;
-            };
-            match library.load(&entry.id) {
-                Ok(rundown) => open(window, &view, entry.id, rundown, cx),
+            }
+            match library.load(&action.id) {
+                Ok(rundown) => open(window, &view, action.id.clone(), rundown, cx),
                 Err(e) => view.update(cx, |v, cx| {
-                    v.show_error(format!("Can't open {}: {e}", entry.title), cx)
+                    v.show_error(format!("Can't open rundown {}: {e}", action.id), cx)
                 }),
             }
             refresh_menus(&view, &library, cx);

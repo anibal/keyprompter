@@ -18,9 +18,12 @@ fn main() {
     let argument = std::env::args_os()
         .nth(1)
         .map(|arg| std::path::absolute(&arg).unwrap_or_else(|_| PathBuf::from(arg)));
-    let restored = match (&argument, &saved.rundown) {
-        (None, Some(id)) => library.load(id).ok().map(|r| (id.clone(), r)),
-        _ => None,
+    let (restored, restore_error) = match (&argument, &saved.rundown) {
+        (None, Some(id)) => match library.load(id) {
+            Ok(rundown) => (Some((id.clone(), rundown)), None),
+            Err(e) => (None, Some(format!("Can't reopen the last rundown: {e}"))),
+        },
+        _ => (None, None),
     };
 
     let (opened_tx, mut opened_rx) = mpsc::unbounded();
@@ -66,6 +69,9 @@ fn main() {
         .expect("open window");
 
         app::connect(window, view.clone(), library.clone(), cx);
+        if let Some(error) = restore_error {
+            view.update(cx, |v, cx| v.show_error(error, cx));
+        }
         hotkeys::listen(view.clone(), cx);
         cx.spawn(async move |cx| {
             while let Some(path) = opened_rx.next().await {

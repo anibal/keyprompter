@@ -4,7 +4,7 @@ use std::{
     time::SystemTime,
 };
 
-use crate::rundown::Rundown;
+use crate::rundown::{FORMAT, Rundown};
 
 /// Rundowns saved as one JSON file each, named by id.
 #[derive(Debug, Clone)]
@@ -15,7 +15,8 @@ pub struct Library {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
     pub id: String,
-    pub title: String,
+    /// `None` when the file can't be read; opening it reports why.
+    pub title: Option<String>,
 }
 
 impl Library {
@@ -32,7 +33,19 @@ impl Library {
     }
 
     pub fn load(&self, id: &str) -> io::Result<Rundown> {
-        serde_json::from_str(&fs::read_to_string(self.path(id))?).map_err(io::Error::other)
+        let mut rundown: Rundown =
+            serde_json::from_str(&fs::read_to_string(self.path(id))?).map_err(io::Error::other)?;
+        if rundown.format > FORMAT {
+            return Err(io::Error::other("it was saved by a newer KeyPrompter"));
+        }
+        let used = rundown
+            .sections
+            .iter()
+            .flat_map(|s| &s.cards)
+            .map(|c| c.id.0)
+            .max();
+        rundown.next_id = rundown.next_id.max(used.map_or(1, |id| id + 1));
+        Ok(rundown)
     }
 
     /// Writes beside the file and renames over it, so a crash mid-save
@@ -47,7 +60,7 @@ impl Library {
         fs::rename(temp, self.path(id))
     }
 
-    fn all(&self) -> Vec<(String, Rundown, SystemTime)> {
+    fn all(&self) -> Vec<(String, io::Result<Rundown>, SystemTime)> {
         let Ok(dir) = fs::read_dir(&self.dir) else {
             return Vec::new();
         };
@@ -60,20 +73,20 @@ impl Library {
                     return None;
                 }
                 let saved = file.metadata().and_then(|m| m.modified()).ok()?;
-                Some((id.clone(), self.load(&id).ok()?, saved))
+                Some((id.clone(), self.load(&id), saved))
             })
             .collect();
         all.sort_by_key(|entry| std::cmp::Reverse(entry.2));
         all
     }
 
-    /// Every readable rundown, most recently saved first.
+    /// Every rundown, most recently saved first.
     pub fn list(&self) -> Vec<Entry> {
         self.all()
             .into_iter()
             .map(|(id, rundown, _)| Entry {
                 id,
-                title: rundown.title,
+                title: rundown.ok().map(|r| r.title),
             })
             .collect()
     }
@@ -81,11 +94,11 @@ impl Library {
     /// The library copy of a Markdown file. The first open imports it; later
     /// opens of the same file return that copy, edits included.
     pub fn open_markdown(&self, path: &Path) -> io::Result<(String, Rundown)> {
-        if let Some((id, rundown, _)) = self
-            .all()
-            .into_iter()
-            .find(|(_, r, _)| r.imported_from.as_deref() == Some(path))
-        {
+        let path = &fs::canonicalize(path)?;
+        if let Some((id, Ok(rundown), _)) = self.all().into_iter().find(|(_, r, _)| {
+            r.as_ref()
+                .is_ok_and(|r| r.imported_from.as_deref() == Some(path.as_path()))
+        }) {
             return Ok((id, rundown));
         }
         let text = fs::read_to_string(path)?;

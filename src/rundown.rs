@@ -13,6 +13,9 @@ pub struct Rundown {
     pub title: String,
     pub imported_from: Option<PathBuf>,
     pub sections: Vec<Section>,
+    /// Never reused, so an id that undo brings back can't belong to another card.
+    #[serde(default)]
+    pub next_id: u64,
 }
 
 /// Only the first section can be untitled: it holds the cards before any `#`.
@@ -78,6 +81,7 @@ impl Rundown {
             title: title.into(),
             imported_from: None,
             sections,
+            next_id: next + 1,
         }
     }
 
