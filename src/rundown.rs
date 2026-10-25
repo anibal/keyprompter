@@ -131,9 +131,9 @@ pub enum Edit {
     /// The next card's cue becomes a bullet and its body follows.
     MergeWithNext(CardId),
     /// Past the first card of a section, a card joins the end of the section before.
-    MoveEarlier(CardId),
+    MoveBefore(CardId),
     /// Past the last card of a section, a card joins the start of the section after.
-    MoveLater(CardId),
+    MoveAfter(CardId),
     /// Refused for the only card, so there is always one to edit.
     Delete(CardId),
 }
@@ -196,7 +196,7 @@ impl Rundown {
                 *body = joined;
                 id
             }
-            Edit::MoveEarlier(id) => {
+            Edit::MoveBefore(id) => {
                 let (s, c) = self.position(id)?;
                 if c > 0 {
                     self.sections[s].cards.swap(c, c - 1);
@@ -209,7 +209,7 @@ impl Rundown {
                 }
                 id
             }
-            Edit::MoveLater(id) => {
+            Edit::MoveAfter(id) => {
                 let (s, c) = self.position(id)?;
                 if c + 1 < self.sections[s].cards.len() {
                     self.sections[s].cards.swap(c, c + 1);

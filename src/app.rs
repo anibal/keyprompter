@@ -13,7 +13,7 @@ use crate::{
     rundown::{CardId, Edit, Rundown},
     show::Command,
     state::Capture,
-    view::StageView,
+    view::{DocumentChanged, StageView},
 };
 
 actions!(
@@ -45,8 +45,8 @@ actions!(
 pub enum EditCard {
     Duplicate,
     MergeWithNext,
-    MoveEarlier,
-    MoveLater,
+    MoveBefore,
+    MoveAfter,
     Delete,
 }
 
@@ -55,8 +55,8 @@ pub const CARD_MENU: &[Option<EditCard>] = &[
     Some(EditCard::Duplicate),
     Some(EditCard::MergeWithNext),
     None,
-    Some(EditCard::MoveEarlier),
-    Some(EditCard::MoveLater),
+    Some(EditCard::MoveBefore),
+    Some(EditCard::MoveAfter),
     None,
     Some(EditCard::Delete),
 ];
@@ -66,8 +66,8 @@ impl EditCard {
         match self {
             EditCard::Duplicate => "Duplicate Card",
             EditCard::MergeWithNext => "Merge with Next Card",
-            EditCard::MoveEarlier => "Move Card Earlier",
-            EditCard::MoveLater => "Move Card Later",
+            EditCard::MoveBefore => "Move Card Before",
+            EditCard::MoveAfter => "Move Card After",
             EditCard::Delete => "Delete Card",
         }
     }
@@ -76,8 +76,8 @@ impl EditCard {
         match self {
             EditCard::Duplicate => Edit::Duplicate(card),
             EditCard::MergeWithNext => Edit::MergeWithNext(card),
-            EditCard::MoveEarlier => Edit::MoveEarlier(card),
-            EditCard::MoveLater => Edit::MoveLater(card),
+            EditCard::MoveBefore => Edit::MoveBefore(card),
+            EditCard::MoveAfter => Edit::MoveAfter(card),
             EditCard::Delete => Edit::Delete(card),
         }
     }
@@ -124,7 +124,19 @@ pub fn key_bindings() -> Vec<KeyBinding> {
     ]
 }
 
-pub fn menus(capture: Capture, screens: &[String], recent: &[Entry]) -> Vec<Menu> {
+/// What Undo and Redo would revert, by the names of the changes.
+#[derive(Clone, Copy, Default)]
+pub struct UndoState {
+    pub undo: Option<&'static str>,
+    pub redo: Option<&'static str>,
+}
+
+fn undo_item(verb: &str, label: Option<&str>, action: impl Action) -> MenuItem {
+    let title = label.map_or_else(|| verb.to_string(), |label| format!("{verb} {label}"));
+    MenuItem::action(title, action).disabled(label.is_none())
+}
+
+pub fn menus(capture: Capture, screens: &[String], recent: &[Entry], undo: UndoState) -> Vec<Menu> {
     vec![
         Menu {
             name: "KeyPrompter".into(),
@@ -168,8 +180,8 @@ pub fn menus(capture: Capture, screens: &[String], recent: &[Entry]) -> Vec<Menu
         Menu {
             name: "Edit".into(),
             items: vec![
-                MenuItem::action("Undo", Undo),
-                MenuItem::action("Redo", Redo),
+                undo_item("Undo", undo.undo, Undo),
+                undo_item("Redo", undo.redo, Redo),
             ],
             disabled: false,
         },
@@ -229,7 +241,7 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
-    cx.set_menus(menus(Capture::default(), &[], &[]));
+    cx.set_menus(menus(Capture::default(), &[], &[], UndoState::default()));
 }
 
 /// Routes the strip's actions to its view. They must be global listeners:
@@ -375,6 +387,11 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
             refresh_menus(&view, &library, cx);
         }
     });
+    cx.subscribe(&view, {
+        let library = library.clone();
+        move |view, _: &DocumentChanged, cx| refresh_menus(&view, &library, cx)
+    })
+    .detach();
     refresh_menus(&view, &library, cx);
     cx.spawn(async move |cx| {
         let mut shown = platform::screen_names();
@@ -393,11 +410,22 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
 /// Rebuilds the menu bar from the capture setting, the connected screens
 /// and the library.
 fn refresh_menus(view: &Entity<StageView>, library: &Library, cx: &mut App) {
+    let view = view.read(cx);
+    let undo = view
+        .document()
+        .map_or_else(UndoState::default, |d| UndoState {
+            undo: d.undo_label(),
+            redo: d.redo_label(),
+        });
     cx.set_menus(menus(
-        view.read(cx).capture(),
+        view.capture(),
         &platform::screen_names(),
         &library.list(),
+        undo,
     ));
+    // GPUI enables any item whose action has a listener, so Undo and Redo
+    // would never gray out.
+    platform::keep_menu_enablement("Edit");
 }
 
 pub fn open(

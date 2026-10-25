@@ -1,6 +1,5 @@
 use keyprompter::{
     document::Document,
-    history::History,
     rundown::{CardId, Edit, Rundown},
 };
 
@@ -73,7 +72,7 @@ fn merge_turns_the_next_cue_into_a_bullet_and_keeps_its_body() {
 fn moving_past_a_section_edge_joins_the_neighbouring_section() {
     let mut r = Rundown::import(SHOW, "s");
     let one = id(&r, "One");
-    r.apply(Edit::MoveEarlier(one)).unwrap();
+    r.apply(Edit::MoveBefore(one)).unwrap();
     assert_eq!(
         layout(&r),
         sections(&[
@@ -82,7 +81,7 @@ fn moving_past_a_section_edge_joins_the_neighbouring_section() {
             (Some("B"), &["Three"])
         ])
     );
-    r.apply(Edit::MoveLater(one)).unwrap();
+    r.apply(Edit::MoveAfter(one)).unwrap();
     assert_eq!(
         layout(&r),
         sections(&[
@@ -96,7 +95,7 @@ fn moving_past_a_section_edge_joins_the_neighbouring_section() {
 #[test]
 fn an_emptied_section_disappears_so_only_the_first_can_be_untitled() {
     let mut r = Rundown::import(SHOW, "s");
-    r.apply(Edit::MoveLater(id(&r, "Open"))).unwrap();
+    r.apply(Edit::MoveAfter(id(&r, "Open"))).unwrap();
     assert_eq!(
         layout(&r),
         sections(&[
@@ -122,8 +121,8 @@ fn edits_that_cannot_apply_change_nothing() {
     let first = r.card_ids()[0];
     let last = *r.card_ids().last().unwrap();
     for edit in [
-        Edit::MoveEarlier(first),
-        Edit::MoveLater(last),
+        Edit::MoveBefore(first),
+        Edit::MoveAfter(last),
         Edit::MergeWithNext(last),
         Edit::Duplicate(CardId(999)),
     ] {
@@ -147,19 +146,6 @@ fn a_deleted_cards_id_is_never_given_to_a_new_card() {
 }
 
 #[test]
-fn undo_and_redo_walk_back_and_forth_and_a_new_step_clears_redo() {
-    let mut history = History::default();
-    history.record(1);
-    history.record(2);
-    assert_eq!(history.undo(3), Some(2));
-    assert_eq!(history.undo(2), Some(1));
-    assert_eq!(history.undo(1), None);
-    assert_eq!(history.redo(1), Some(2));
-    history.record(2);
-    assert_eq!(history.redo(9), None);
-}
-
-#[test]
 fn merging_a_card_with_an_empty_cue_adds_no_stray_bullet() {
     let mut r = Rundown::import("## a\nbody a\n## \nbody b\n", "s");
     let a = r.card_ids()[0];
@@ -179,15 +165,27 @@ fn a_document_keeps_its_deck_in_step_and_says_which_card_to_show() {
         |d: &Document| -> Vec<String> { d.deck().slides.iter().map(|s| s.cue.clone()).collect() };
     let mut d = Document::new("s".into(), Rundown::import("## a\n## b\n## c\n", "s"));
     assert_eq!(
-        d.edit(2, Edit::Delete),
+        d.edit(2, "Delete Card", Edit::Delete),
         Some(1),
         "deleting the last card shows the one before"
     );
     assert_eq!(cues(&d), ["a", "b"]);
+    assert_eq!(
+        (d.undo_label(), d.redo_label()),
+        (Some("Delete Card"), None)
+    );
     assert_eq!(d.undo(1), Some(2), "undo shows the card that was current");
+    assert_eq!(
+        (d.undo_label(), d.redo_label()),
+        (None, Some("Delete Card"))
+    );
     assert_eq!(cues(&d), ["a", "b", "c"]);
     assert_eq!(d.redo(2), Some(1));
     assert_eq!(cues(&d), ["a", "b"]);
     assert_eq!(d.redo(1), None, "nothing left to redo");
-    assert_eq!(d.edit(9, Edit::Delete), None, "no card there");
+    assert_eq!(
+        d.edit(9, "Delete Card", Edit::Delete),
+        None,
+        "no card there"
+    );
 }

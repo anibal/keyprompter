@@ -12,7 +12,8 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSEvent, NSMenu, NSMenuItem, NSScreen, NSView, NSWindow, NSWindowSharingType, NSWorkspace,
+    NSApplication, NSEvent, NSMenu, NSMenuItem, NSScreen, NSView, NSWindow, NSWindowSharingType,
+    NSWorkspace,
 };
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -279,4 +280,22 @@ pub fn context_menu(view: &NSView, items: &[Option<&str>], at: (f32, f32)) -> Op
         Some(view),
     );
     CHOSEN.take().map(|i| i as usize)
+}
+
+/// Makes the menu-bar menu titled `title` keep the enabled state each item was
+/// built with instead of asking the app's validator on every open.
+pub fn keep_menu_enablement(title: &str) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let Some(bar) = NSApplication::sharedApplication(mtm).mainMenu() else {
+        return;
+    };
+    for item in bar.itemArray() {
+        if let Some(menu) = item.submenu()
+            && menu.title().to_string() == title
+        {
+            menu.setAutoenablesItems(false);
+        }
+    }
 }

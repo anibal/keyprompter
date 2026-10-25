@@ -22,7 +22,7 @@ global-hotkey = "0.7"
 raw-window-handle = "0.6"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString", "NSObject"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSWindow", "NSResponder", "NSWorkspace", "NSScreen", "NSEvent", "NSMenu", "NSMenuItem", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSView", "NSWindow", "NSResponder", "NSWorkspace", "NSScreen", "NSEvent", "NSMenu", "NSMenuItem", "objc2-core-foundation"] }
 
 [dev-dependencies]
 gpui-kit = { version = "=0.7.3", features = ["test-support"] }

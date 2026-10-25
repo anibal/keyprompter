@@ -212,7 +212,7 @@ async fn card_menu_edits_act_on_the_current_card_save_and_undo(cx: &mut TestAppC
     );
     assert_eq!(library.load("test").unwrap().card_ids().len(), 4, "saved");
 
-    act(cx, EditCard::MoveLater);
+    act(cx, EditCard::MoveAfter);
     act(cx, EditCard::Delete);
     assert_eq!(cues(cx, &view), ["a", "b", "c"]);
 
@@ -274,4 +274,45 @@ async fn right_clicking_a_card_makes_it_current(cx: &mut TestAppContext) {
     cx.simulate_mouse_down(next_card, gpui_kit::MouseButton::Right, Default::default());
     cx.run_until_parked();
     assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 1);
+}
+
+#[gpui_kit::test]
+async fn clicking_a_card_brings_it_to_the_middle(cx: &mut TestAppContext) {
+    let (handle, view) = open(cx, "## a\n## b\n## c\n");
+    let mut cx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    let next_card = gpui_kit::point(px(942.), px(75.));
+    cx.simulate_click(next_card, Default::default());
+    cx.run_until_parked();
+    assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 1);
+}
+
+#[gpui_kit::test]
+async fn undo_and_redo_name_the_change_and_gray_out_when_empty(cx: &mut TestAppContext) {
+    use gpui_kit::OwnedMenuItem;
+    let (_, _view) = open(cx, "## a\n## b\n");
+    let edit_menu = |cx: &mut TestAppContext| -> Vec<(String, bool)> {
+        cx.update(|cx| {
+            let menus = cx.get_menus().unwrap();
+            let edit = menus.iter().find(|m| m.name == "Edit").unwrap();
+            edit.items
+                .iter()
+                .filter_map(|item| match item {
+                    OwnedMenuItem::Action { name, disabled, .. } => Some((name.clone(), *disabled)),
+                    _ => None,
+                })
+                .collect()
+        })
+    };
+    let item = |name: &str, disabled| (name.to_string(), disabled);
+    assert_eq!(edit_menu(cx), [item("Undo", true), item("Redo", true)]);
+    act(cx, keyprompter::app::EditCard::Delete);
+    assert_eq!(
+        edit_menu(cx),
+        [item("Undo Delete Card", false), item("Redo", true)]
+    );
+    act(cx, keyprompter::app::Undo);
+    assert_eq!(
+        edit_menu(cx),
+        [item("Undo", true), item("Redo Delete Card", false)]
+    );
 }

@@ -58,6 +58,11 @@ fn theme(appearance: WindowAppearance) -> Theme {
     }
 }
 
+/// The open rundown was replaced or changed, so its undo state may differ.
+pub struct DocumentChanged;
+
+impl EventEmitter<DocumentChanged> for StageView {}
+
 pub struct StageView {
     focus: FocusHandle,
     show: Show,
@@ -197,6 +202,7 @@ impl StageView {
         self.layout_key = None;
         self.error = None;
         self.persist(window);
+        cx.emit(DocumentChanged);
         cx.notify();
     }
 
@@ -206,7 +212,7 @@ impl StageView {
         let focus = self
             .document
             .as_mut()
-            .and_then(|d| d.edit(cursor, |card| op.edit(card)));
+            .and_then(|d| d.edit(cursor, op.title(), |card| op.edit(card)));
         self.settle(focus, cx);
     }
 
@@ -234,6 +240,7 @@ impl StageView {
             .map(|e| format!("Can't save: {e}"));
         self.command(Command::Goto(focus), cx);
         self.layout_key = None;
+        cx.emit(DocumentChanged);
     }
 
     /// Makes the right-clicked card current, then offers the card edits in a
@@ -451,6 +458,18 @@ impl Render for StageView {
                 Some(
                     div()
                         .id(("slide", i))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                // The current card lets the press through to
+                                // the strip, which drags the window.
+                                if i != this.show.cursor() {
+                                    cx.stop_propagation();
+                                    cx.activate(true);
+                                    this.command(Command::Goto(i), cx);
+                                }
+                            }),
+                        )
                         .on_mouse_down(
                             MouseButton::Right,
                             cx.listener(move |this, e: &MouseDownEvent, window, cx| {
