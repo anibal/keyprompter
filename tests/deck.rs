@@ -1,4 +1,11 @@
-use keyprompter::deck::{Block, SpanStyle, parse};
+use keyprompter::{
+    deck::{Block, Deck, SpanStyle},
+    rundown::Rundown,
+};
+
+fn parse(markdown: &str) -> Deck {
+    Rundown::import(markdown, "").deck()
+}
 
 fn text(spans: &[keyprompter::deck::Span]) -> Vec<(&str, SpanStyle)> {
     spans.iter().map(|s| (s.text.as_str(), s.style)).collect()

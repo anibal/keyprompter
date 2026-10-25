@@ -1,5 +1,3 @@
-use crate::rundown::Rundown;
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Deck {
     pub slides: Vec<Slide>,
@@ -30,11 +28,6 @@ pub enum SpanStyle {
     Bold,
     Italic,
     Code,
-}
-
-/// Total: any text yields a deck. Lines before the first `##` belong to no slide.
-pub fn parse(markdown: &str) -> Deck {
-    Rundown::import(markdown, "").deck()
 }
 
 /// The body of one card: bullets, paragraphs, and deeper headings as bold lines.

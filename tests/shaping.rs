@@ -7,9 +7,9 @@ use gpui_kit::{
     AppContext, Bounds, TestAppContext, TestDispatcher, WindowBounds, WindowOptions, px, size,
 };
 use keyprompter::{
-    deck::parse,
     layout::{CardLayout, Mark, TypeScale, layout},
     library::Library,
+    rundown::Rundown,
     state::State,
     view::StageView,
 };
@@ -47,7 +47,7 @@ fn lay_out(markdown: &str, width: f32) -> CardLayout {
         )
         .unwrap()
     });
-    let deck = parse(markdown);
+    let deck = Rundown::import(markdown, "").deck();
     cx.update_window(handle, |_, window, _| {
         layout(&deck.slides[0], TypeScale::new(118.0, 0), width, window)
     })

@@ -1,7 +1,12 @@
 use std::time::{Duration, Instant};
 
-use keyprompter::deck::parse;
+use keyprompter::deck::Deck;
+use keyprompter::rundown::Rundown;
 use keyprompter::show::{Command, Show};
+
+fn parse(markdown: &str) -> Deck {
+    Rundown::import(markdown, "").deck()
+}
 
 fn show(n: usize) -> Show {
     Show::new(parse(

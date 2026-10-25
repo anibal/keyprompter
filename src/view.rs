@@ -164,10 +164,6 @@ impl StageView {
         self.show.cursor()
     }
 
-    pub fn pos(&self) -> f32 {
-        self.pos
-    }
-
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
