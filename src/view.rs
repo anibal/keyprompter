@@ -859,13 +859,15 @@ impl Render for StageView {
                     );
                 Some(element.into_any_element())
             });
-        // A live resize hides the cards and dims the rest. The strip changes
-        // size every frame, and macOS stalls those redraws often enough that
-        // the cards visibly wobble.
-        let resizing = self
+        // Once a gesture has moved the strip, the cards are hidden and the
+        // rest dimmed until release. macOS stalls the redraws that keep the
+        // cards in step with the window often enough that they visibly
+        // wobble. A click that hasn't moved it yet keeps them.
+        let dragging = self
             .drag
-            .is_some_and(|d| matches!(d.gesture, Gesture::Resize(_)));
-        let cards: Vec<_> = if resizing {
+            .zip(placed)
+            .is_some_and(|(d, (f, _, _))| f != d.grab);
+        let cards: Vec<_> = if dragging {
             Vec::new()
         } else {
             ghosts.chain(live).collect()
@@ -898,7 +900,7 @@ impl Render for StageView {
             .gap_0p5()
             .border_r_1()
             .border_color(t.card)
-            .opacity(if resizing { 0.4 } else { 1.0 })
+            .opacity(if dragging { 0.4 } else { 1.0 })
             .child(
                 div()
                     .text_size(px(15.0))
