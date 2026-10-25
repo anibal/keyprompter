@@ -87,7 +87,9 @@ pub struct StageView {
     /// What `layouts` were laid out for. `None` once the deck has changed.
     layout_key: Option<(TypeScale, f32)>,
     content_h: f32,
-    settling: Option<Task<()>>,
+    /// The gesture in flight. While one lives it owns the frame.
+    drag: Option<Drag>,
+    _drag_task: Option<Task<()>>,
     _subscriptions: [Subscription; 3],
     _tick: Task<()>,
 }
@@ -138,7 +140,8 @@ impl StageView {
             content_h: 0.0,
             saved,
             state_path,
-            settling: None,
+            drag: None,
+            _drag_task: None,
             _subscriptions: subscriptions,
             _tick: tick,
         };
@@ -362,51 +365,66 @@ impl StageView {
         cx.notify();
     }
 
-    /// Once any drag ends, pulls the strip onto its magnets and saves the
-    /// placement. Also runs at launch, so a restored frame settles the same way.
-    pub fn moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.settling.is_some() {
-            return;
-        }
-        self.settling = Some(cx.spawn_in(window, async move |this, cx| {
-            while platform::pointer().down {
-                cx.background_executor()
-                    .timer(Duration::from_millis(50))
-                    .await;
-            }
-            this.update_in(cx, |this, window, cx| {
-                this.settling = None;
-                this.snap(window, cx);
-                this.persist(window, cx);
-            })
-            .ok();
-        }));
-    }
-
-    /// Pulls the frame onto its magnets. A move step with the pointer where it
-    /// is leaves only the magnets to act.
-    fn snap(&self, window: &Window, cx: &mut Context<Self>) {
+    /// A left press on the strip starts a move.
+    fn press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(frame) = platform::frame(window) else {
             return;
         };
         let screens = platform::screens();
-        let at = platform::pointer().at;
-        let drag = Drag {
-            gesture: Gesture::Move,
-            grab: frame,
-            at,
-            symmetric: false,
+        let Some(placement) = snap::classify(frame, &screens, Widths::default()) else {
+            return;
         };
-        let settled = snap::release(drag.step(at, false, &screens), &screens);
-        if settled != frame {
-            place(settled, window, cx);
+        let at = platform::pointer().at;
+        self.drag = Some(Drag::start(Gesture::Move, frame, at, placement.stick));
+        // Polling, not GPUI mouse events, because `on_mouse_move` listeners
+        // fire only while hovered and a fast drag leaves the window.
+        self._drag_task = Some(cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(8))
+                    .await;
+                let live = this.update_in(cx, |this, window, cx| this.drag_tick(window, cx));
+                if !live.unwrap_or(false) {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// One step of the gesture: the frame the pointer asks for, or on release
+    /// the settled frame, whose bounds notification saves it. `false` once the
+    /// gesture is over.
+    fn drag_tick(&mut self, window: &Window, cx: &mut Context<Self>) -> bool {
+        let Some(drag) = self.drag else {
+            return false;
+        };
+        let p = platform::pointer();
+        let screens = platform::screens();
+        let frame = drag.step(p.at, p.option, &screens);
+        if p.down {
+            place(frame, window, cx);
+            return true;
+        }
+        self.drag = None;
+        place(snap::release(frame, &screens), window, cx);
+        false
+    }
+
+    /// Bounds observer. A no-op while a drag lives, since the gesture owns the
+    /// frame. Otherwise saves, which covers display changes and the restore.
+    pub fn moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.drag.is_none() {
+            self.persist(window, cx);
         }
     }
 
     /// Classifies the live frame, records the width, saves when changed, and
     /// says when the stick changed. A test window has no frame and keeps the
-    /// saved placement.
+    /// saved placement. Nothing is saved mid-gesture.
     fn persist(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.drag.is_some() {
+            return;
+        }
         let placement = platform::frame(window)
             .and_then(|f| snap::classify(f, &platform::screens(), self.widths()))
             .or_else(|| self.saved.placement.clone());
@@ -851,10 +869,13 @@ impl Render for StageView {
             .track_focus(&self.focus)
             // The strip is a non-activating panel, so a click alone would leave the
             // previous app's menu bar showing.
-            .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                cx.activate(true);
-                window.start_window_move();
-            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    cx.activate(true);
+                    this.press(window, cx);
+                }),
+            )
             .size_full()
             .flex()
             .bg(t.bg)
