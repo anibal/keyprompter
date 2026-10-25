@@ -316,3 +316,42 @@ async fn undo_and_redo_name_the_change_and_gray_out_when_empty(cx: &mut TestAppC
         [item("Undo", true), item("Redo Delete Card", false)]
     );
 }
+
+#[test]
+fn the_view_menu_checks_the_side_the_strip_is_stuck_to() {
+    use gpui_kit::MenuItem;
+    use keyprompter::{
+        app::{UndoState, menus},
+        snap::Side,
+    };
+    let sticks = |stuck: Option<Side>| -> Vec<(String, bool)> {
+        let menus = menus(Capture::Hidden, &[], &[], UndoState::default(), stuck);
+        let view = menus.iter().find(|m| m.name == "View").unwrap();
+        view.items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Action { name, checked, .. } if name.starts_with("Stick to") => {
+                    Some((name.to_string(), *checked))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let item = |name: &str, checked| (name.to_string(), checked);
+    assert_eq!(
+        sticks(None),
+        [
+            item("Stick to Left", false),
+            item("Stick to Center", false),
+            item("Stick to Right", false)
+        ]
+    );
+    assert_eq!(
+        sticks(Some(Side::Right)),
+        [
+            item("Stick to Left", false),
+            item("Stick to Center", false),
+            item("Stick to Right", true)
+        ]
+    );
+}

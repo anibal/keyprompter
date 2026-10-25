@@ -12,8 +12,9 @@ use crate::{
     platform,
     rundown::{CardId, Edit, Rundown, Side},
     show::Command,
+    snap,
     state::Capture,
-    view::{DocumentChanged, StageView},
+    view::{DocumentChanged, PlacementChanged, StageView},
 };
 
 actions!(
@@ -99,6 +100,11 @@ pub struct MoveToDisplay {
     pub index: usize,
 }
 
+/// Sticks the strip to a side of its screen, at the width it last had there.
+#[derive(Clone, Copy, PartialEq, Debug, Deserialize, JsonSchema, Action)]
+#[action(namespace = keyprompter)]
+pub struct StickTo(pub snap::Side);
+
 /// Puts the strip at a screen-local `[x, top, w, h]` on the main screen. Not
 /// in any menu: the drive pipe sends it, as `SetFrame [0,400,700,150]`.
 #[derive(Clone, PartialEq, Debug, Deserialize, JsonSchema, Action)]
@@ -126,6 +132,9 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-z", Undo, Some(STRIP)),
         KeyBinding::new("shift-cmd-z", Redo, Some(STRIP)),
         KeyBinding::new("alt-cmd-up", MoveToTop, None),
+        KeyBinding::new("alt-cmd-left", StickTo(snap::Side::Left), None),
+        KeyBinding::new("alt-cmd-down", StickTo(snap::Side::Center), None),
+        KeyBinding::new("alt-cmd-right", StickTo(snap::Side::Right), None),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-h", Hide, None),
         KeyBinding::new("alt-cmd-h", HideOthers, None),
@@ -144,7 +153,43 @@ fn undo_item(verb: &str, label: Option<&str>, action: impl Action) -> MenuItem {
     MenuItem::action(title, action).disabled(label.is_none())
 }
 
-pub fn menus(capture: Capture, screens: &[String], recent: &[Entry], undo: UndoState) -> Vec<Menu> {
+/// The menu bar. `stuck` is the side the strip is stuck to, for the checkmark.
+pub fn menus(
+    capture: Capture,
+    screens: &[String],
+    recent: &[Entry],
+    undo: UndoState,
+    stuck: Option<snap::Side>,
+) -> Vec<Menu> {
+    let sticks = [
+        (snap::Side::Left, "Stick to Left"),
+        (snap::Side::Center, "Stick to Center"),
+        (snap::Side::Right, "Stick to Right"),
+    ]
+    .map(|(side, title)| MenuItem::action(title, StickTo(side)).checked(stuck == Some(side)));
+    let mut view = vec![
+        MenuItem::action("Hide from Screen Capture", ToggleCapture)
+            .checked(capture == Capture::Hidden),
+        MenuItem::separator(),
+        MenuItem::action("Bigger Text", BiggerText),
+        MenuItem::action("Smaller Text", SmallerText),
+        MenuItem::action("Default Text Size", DefaultTextSize),
+        MenuItem::separator(),
+    ];
+    view.extend(sticks);
+    view.extend([
+        MenuItem::separator(),
+        MenuItem::action("Move to Top of Screen", MoveToTop),
+        MenuItem::submenu(Menu {
+            name: "Move to Display".into(),
+            items: screens
+                .iter()
+                .enumerate()
+                .map(|(index, name)| MenuItem::action(name.clone(), MoveToDisplay { index }))
+                .collect(),
+            disabled: screens.is_empty(),
+        }),
+    ]);
     vec![
         Menu {
             name: "KeyPrompter".into(),
@@ -205,27 +250,7 @@ pub fn menus(capture: Capture, screens: &[String], recent: &[Entry], undo: UndoS
         },
         Menu {
             name: "View".into(),
-            items: vec![
-                MenuItem::action("Hide from Screen Capture", ToggleCapture)
-                    .checked(capture == Capture::Hidden),
-                MenuItem::separator(),
-                MenuItem::action("Bigger Text", BiggerText),
-                MenuItem::action("Smaller Text", SmallerText),
-                MenuItem::action("Default Text Size", DefaultTextSize),
-                MenuItem::separator(),
-                MenuItem::action("Move to Top of Screen", MoveToTop),
-                MenuItem::submenu(Menu {
-                    name: "Move to Display".into(),
-                    items: screens
-                        .iter()
-                        .enumerate()
-                        .map(|(index, name)| {
-                            MenuItem::action(name.clone(), MoveToDisplay { index })
-                        })
-                        .collect(),
-                    disabled: screens.is_empty(),
-                }),
-            ],
+            items: view,
             disabled: false,
         },
         Menu {
@@ -249,7 +274,13 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
-    cx.set_menus(menus(Capture::default(), &[], &[], UndoState::default()));
+    cx.set_menus(menus(
+        Capture::default(),
+        &[],
+        &[],
+        UndoState::default(),
+        None,
+    ));
 }
 
 /// Routes the strip's actions to its view. They must be global listeners:
@@ -325,6 +356,16 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
         move |_: &MoveToTop, cx| move_to_top(None, cx)
     });
     cx.on_action(move |action: &MoveToDisplay, cx| move_to_top(Some(action.index), cx));
+    cx.on_action({
+        let view = view.clone();
+        move |action: &StickTo, cx| {
+            window
+                .update(cx, |_, window, cx| {
+                    view.update(cx, |v, cx| v.stick_to(action.0, window, cx))
+                })
+                .ok();
+        }
+    });
     cx.on_action({
         let view = view.clone();
         move |action: &SetFrame, cx| {
@@ -409,6 +450,11 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
         move |view, _: &DocumentChanged, cx| refresh_menus(&view, &library, cx)
     })
     .detach();
+    cx.subscribe(&view, {
+        let library = library.clone();
+        move |view, _: &PlacementChanged, cx| refresh_menus(&view, &library, cx)
+    })
+    .detach();
     refresh_menus(&view, &library, cx);
     cx.spawn(async move |cx| {
         let mut shown = platform::screen_names();
@@ -439,6 +485,7 @@ fn refresh_menus(view: &Entity<StageView>, library: &Library, cx: &mut App) {
         &platform::screen_names(),
         &library.list(),
         undo,
+        view.stuck(),
     ));
     // GPUI enables any item whose action has a listener, so Undo and Redo
     // would never gray out.

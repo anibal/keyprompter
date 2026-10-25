@@ -455,6 +455,20 @@ impl StageView {
         }
     }
 
+    /// View > Stick to `side`: the strip flush there, at the width it last
+    /// had on that side, else its current width.
+    pub fn stick_to(&mut self, side: Side, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(frame) = platform::frame(window) else {
+            return;
+        };
+        let screens = platform::screens();
+        if let Some(screen) = snap::holding(frame, &screens)
+            && let Some(placement) = snap::classify(frame, &screens, self.widths())
+        {
+            place(placement.stuck(side, frame, screen), window, cx);
+        }
+    }
+
     /// Puts the strip at a screen-local `[x, top, w, h]` on the main screen.
     pub fn set_frame(
         &mut self,
