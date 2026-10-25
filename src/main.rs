@@ -8,15 +8,8 @@ use std::{
 use futures::{StreamExt, channel::mpsc};
 use gpui_kit::*;
 use keyprompter::{
-    app,
-    document::Document,
-    hotkeys,
-    library::Library,
-    state::{self, Frame},
-    view::StageView,
+    app, document::Document, hotkeys, library::Library, snap, state, view::StageView,
 };
-
-const DEFAULT_H: f32 = 150.0;
 
 /// Points KeyPrompter at another settings and library folder. A test run there
 /// also reads actions line by line from its `drive` pipe, each a name with
@@ -78,19 +71,17 @@ fn main() {
     application.run(move |cx| {
         init(cx);
         app::init(cx);
-        let frame = saved.frame.unwrap_or_else(|| Frame {
-            x: 0.0,
-            y: 0.0,
-            w: cx
-                .primary_display()
-                .map_or(1440.0, |d| f32::from(d.bounds().size.width)),
-            h: DEFAULT_H,
-        });
+        // The saved placement goes on once the window is on screen; see
+        // StageView::new.
+        let w = cx
+            .primary_display()
+            .map_or(1440.0, |d| f32::from(d.bounds().size.width));
+        let h = saved.placement.as_ref().map_or(snap::DEFAULT_H, |p| p.h);
         let (window, view) = open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds {
-                    origin: point(px(frame.x), px(frame.y)),
-                    size: size(px(frame.w), px(frame.h)),
+                    origin: point(px(0.0), px(0.0)),
+                    size: size(px(w), px(h)),
                 })),
                 titlebar: None,
                 kind: WindowKind::PopUp,

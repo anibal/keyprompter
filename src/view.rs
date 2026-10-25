@@ -15,15 +15,14 @@ use crate::{
     platform,
     rundown::Rundown,
     show::{Command, Show, format_elapsed},
+    snap::{self, Drag, Gesture, Placement, Side, Widths},
     stage::{ease, slot},
-    state::{self, Capture, Frame, State},
+    state::{self, Capture, State},
 };
 
 const COLUMN_W: f32 = 200.0;
-const MAX_CARD_W: f32 = 420.0;
 const CARD_VPAD: f32 = 12.0;
 const CARD_PAD: f32 = 10.0;
-const SNAP_REACH: f32 = 24.0;
 
 struct Theme {
     bg: Hsla,
@@ -63,6 +62,11 @@ fn theme(appearance: WindowAppearance) -> Theme {
 pub struct DocumentChanged;
 
 impl EventEmitter<DocumentChanged> for StageView {}
+
+/// The strip stuck to another side, or came loose.
+pub struct PlacementChanged;
+
+impl EventEmitter<PlacementChanged> for StageView {}
 
 pub struct StageView {
     focus: FocusHandle,
@@ -139,14 +143,31 @@ impl StageView {
             _tick: tick,
         };
         // macOS pulls a window under the menu bar when it first shows it, so
-        // the saved frame goes back on once it is on screen.
+        // the saved placement goes back on once it is on screen.
         cx.on_next_frame(window, |this, window, cx| {
-            if let Some(frame) = this.saved.frame {
-                platform::restore(window, frame);
+            if let Some(frame) = this
+                .saved
+                .placement
+                .as_ref()
+                .and_then(|p| p.frame_on(&platform::screens()))
+            {
+                platform::set_frame(window, frame);
             }
             this.moved(window, cx);
         });
         view
+    }
+
+    fn widths(&self) -> Widths {
+        self.saved
+            .placement
+            .as_ref()
+            .map_or(Widths::default(), |p| p.widths)
+    }
+
+    /// The side the strip is stuck to, as last saved.
+    pub fn stuck(&self) -> Option<Side> {
+        self.saved.placement.as_ref().and_then(|p| p.stick.side())
     }
 
     pub fn cursor(&self) -> usize {
@@ -163,7 +184,7 @@ impl StageView {
 
     pub fn set_text_step(&mut self, step: i32, window: &Window, cx: &mut Context<Self>) {
         self.text_step = step.clamp(layout::MIN_STEP, layout::MAX_STEP);
-        self.persist(window);
+        self.persist(window, cx);
         cx.notify();
     }
 
@@ -184,13 +205,13 @@ impl StageView {
         self.capture
     }
 
-    pub fn toggle_capture(&mut self, window: &Window) {
+    pub fn toggle_capture(&mut self, window: &Window, cx: &mut Context<Self>) {
         self.capture = match self.capture {
             Capture::Hidden => Capture::Shown,
             Capture::Shown => Capture::Hidden,
         };
         platform::hide_from_capture(window, self.capture == Capture::Hidden);
-        self.persist(window);
+        self.persist(window, cx);
     }
 
     pub fn document(&self) -> Option<&Document> {
@@ -209,7 +230,7 @@ impl StageView {
         self.layouts.clear();
         self.layout_key = None;
         self.error = None;
-        self.persist(window);
+        self.persist(window, cx);
         cx.emit(DocumentChanged);
         cx.notify();
     }
@@ -341,41 +362,60 @@ impl StageView {
     }
 
     fn tick(&mut self, window: &Window, cx: &mut Context<Self>) {
-        self.persist(window);
+        self.persist(window, cx);
         cx.notify();
     }
 
-    /// Once any drag ends, snaps onto nearby edges and saves the frame. Also
-    /// runs at launch, so a restored frame settles the same way.
+    /// Once any drag ends, pulls the strip onto its magnets and saves the
+    /// placement. Also runs at launch, so a restored frame settles the same way.
     pub fn moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.settling.is_some() {
             return;
         }
         self.settling = Some(cx.spawn_in(window, async move |this, cx| {
-            while platform::mouse_down() {
+            while platform::pointer().down {
                 cx.background_executor()
                     .timer(Duration::from_millis(50))
                     .await;
             }
-            this.update_in(cx, |this, window, _| {
+            this.update_in(cx, |this, window, cx| {
+                this.snap(window);
                 this.settling = None;
-                platform::snap_to_edges(window, SNAP_REACH);
-                this.persist(window);
+                this.persist(window, cx);
             })
             .ok();
         }));
     }
 
-    fn persist(&mut self, window: &Window) {
-        let b = window.bounds();
-        let frame = platform::frame(window).unwrap_or(Frame {
-            x: f32::from(b.origin.x),
-            y: f32::from(b.origin.y),
-            w: f32::from(b.size.width),
-            h: f32::from(b.size.height),
-        });
+    /// Pulls the frame onto its magnets. A move step with the pointer where it
+    /// is leaves only the magnets to act.
+    fn snap(&self, window: &Window) {
+        let Some(frame) = platform::frame(window) else {
+            return;
+        };
+        let screens = platform::screens();
+        let at = platform::pointer().at;
+        let drag = Drag {
+            gesture: Gesture::Move,
+            grab: frame,
+            at,
+            symmetric: false,
+        };
+        let settled = snap::release(drag.step(at, false, &screens), &screens);
+        if settled != frame {
+            platform::set_frame(window, settled);
+        }
+    }
+
+    /// Classifies the live frame, records the width, saves when changed, and
+    /// says when the stick changed. A test window has no frame and keeps the
+    /// saved placement.
+    fn persist(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let placement = platform::frame(window)
+            .and_then(|f| snap::classify(f, &platform::screens(), self.widths()))
+            .or_else(|| self.saved.placement.clone());
         let current = State {
-            frame: Some(frame),
+            placement,
             rundown: self.document.as_ref().map(|d| d.id().to_owned()),
             capture: self.capture,
             text: self.text_step,
@@ -384,8 +424,42 @@ impl StageView {
             && let Some(path) = &self.state_path
             && state::save(path, &current).is_ok()
         {
+            let was = self.stuck();
             self.saved = current;
+            if self.stuck() != was {
+                cx.emit(PlacementChanged);
+            }
         }
+    }
+
+    /// Puts the strip on the very top edge of a screen, over its menu bar,
+    /// keeping its stick. `None` means its current screen.
+    pub fn move_to_top(
+        &mut self,
+        screen: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(frame) = platform::frame(window) else {
+            return;
+        };
+        let screens = platform::screens();
+        let target = match screen {
+            Some(i) => screens.get(i),
+            None => snap::holding(frame, &screens),
+        };
+        if let Some(target) = target
+            && let Some(placement) = snap::classify(frame, &screens, self.widths())
+        {
+            let placed = Placement {
+                top: 0.0,
+                ..placement
+            };
+            platform::set_frame(window, placed.on(target));
+        }
+        // GPUI drops the bounds notification while the window is borrowed
+        // here, so save by hand.
+        self.persist(window, cx);
     }
 
     pub fn command(&mut self, cmd: Command, cx: &mut Context<Self>) {
@@ -565,7 +639,7 @@ impl Render for StageView {
         let (win_w, win_h) = (f32::from(view.width), f32::from(view.height));
         let stage_w = win_w - COLUMN_W;
         let hot_x = win_w / 2.0 - COLUMN_W;
-        let card_w = MAX_CARD_W.min(win_w * 0.3);
+        let card_w = snap::card_width(win_w);
         let card_h = win_h - CARD_VPAD;
 
         let content_h = card_h - 2.0 * CARD_PAD;

@@ -139,7 +139,7 @@ async fn the_capture_toggle_flips_between_hidden_and_shown(cx: &mut TestAppConte
     assert_eq!(capture(cx), Capture::Hidden);
     let toggle = |cx: &mut TestAppContext| {
         cx.update_window(handle, |_, window, cx| {
-            view.update(cx, |v, _| v.toggle_capture(window))
+            view.update(cx, |v, cx| v.toggle_capture(window, cx))
         })
         .unwrap()
     };

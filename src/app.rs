@@ -277,21 +277,18 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
         move |_: &ToggleCapture, cx| {
             window
                 .update(cx, |_, window, cx| {
-                    view.update(cx, |v, _| v.toggle_capture(window))
+                    view.update(cx, |v, cx| v.toggle_capture(window, cx))
                 })
                 .ok();
             refresh_menus(&view, &library, cx);
         }
     });
-    // GPUI drops the move notification while the window is borrowed here, so
-    // settle and save by hand.
     let move_to_top = {
         let view = view.clone();
         move |screen: Option<usize>, cx: &mut App| {
             window
                 .update(cx, |_, window, cx| {
-                    platform::move_to_top(window, screen);
-                    view.update(cx, |v, cx| v.moved(window, cx));
+                    view.update(cx, |v, cx| v.move_to_top(screen, window, cx))
                 })
                 .ok();
         }
