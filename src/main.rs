@@ -19,7 +19,8 @@ use keyprompter::{
 const DEFAULT_H: f32 = 150.0;
 
 /// Points KeyPrompter at another settings and library folder. A test run there
-/// also reads action names, such as `Next`, line by line from its `drive` pipe.
+/// also reads actions line by line from its `drive` pipe, each a name with
+/// any data as JSON after a space, such as `Next` or `EditCard "Delete"`.
 const TEST_HOME: &str = "KEYPROMPTER_HOME";
 
 enum Request {
@@ -112,8 +113,10 @@ fn main() {
             while let Some(request) = requests_rx.next().await {
                 cx.update(|cx| match request {
                     Request::Import(path) => app::open_markdown(window, &view, &library, &path, cx),
-                    Request::Action(name) => {
-                        match cx.build_action(&format!("keyprompter::{name}"), None) {
+                    Request::Action(line) => {
+                        let (name, data) = line.split_once(' ').unwrap_or((&line, ""));
+                        let data = serde_json::from_str(data).ok();
+                        match cx.build_action(&format!("keyprompter::{name}"), data) {
                             Ok(action) => cx.dispatch_action(&*action),
                             Err(e) => view.update(cx, |v, cx| v.show_error(e.to_string(), cx)),
                         }

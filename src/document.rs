@@ -41,7 +41,7 @@ impl Document {
 
     /// Applies `edit` to the card at `index`. On a change, returns the index of
     /// the card the edit focuses.
-    pub fn edit(&mut self, index: usize, edit: fn(CardId) -> Edit) -> Option<usize> {
+    pub fn edit(&mut self, index: usize, edit: impl FnOnce(CardId) -> Edit) -> Option<usize> {
         let card = self.card(index)?;
         let mut next = self.rundown.clone();
         let focus = next.apply(edit(card))?;

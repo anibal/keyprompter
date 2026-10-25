@@ -198,12 +198,12 @@ fn act(cx: &mut TestAppContext, action: impl gpui_kit::Action) {
 
 #[gpui_kit::test]
 async fn card_menu_edits_act_on_the_current_card_save_and_undo(cx: &mut TestAppContext) {
-    use keyprompter::app::{DeleteCard, DuplicateCard, MoveCardLater, Redo, Undo};
+    use keyprompter::app::{EditCard, Redo, Undo};
     let library = library();
     let (handle, view) = open_in(cx, "## a\n## b\n## c\n", library.clone());
     press(cx, handle, "right");
 
-    act(cx, DuplicateCard);
+    act(cx, EditCard::Duplicate);
     assert_eq!(cues(cx, &view), ["a", "b", "b", "c"]);
     assert_eq!(
         cx.read_entity(&view, |v, _| v.cursor()),
@@ -212,8 +212,8 @@ async fn card_menu_edits_act_on_the_current_card_save_and_undo(cx: &mut TestAppC
     );
     assert_eq!(library.load("test").unwrap().card_ids().len(), 4, "saved");
 
-    act(cx, MoveCardLater);
-    act(cx, DeleteCard);
+    act(cx, EditCard::MoveLater);
+    act(cx, EditCard::Delete);
     assert_eq!(cues(cx, &view), ["a", "b", "c"]);
 
     act(cx, Undo);
@@ -241,7 +241,7 @@ async fn cmd_z_on_the_strip_undoes_and_a_failed_save_error_clears_on_the_next_sa
     cx: &mut TestAppContext,
 ) {
     let (handle, view) = open(cx, "## a\n## b\n");
-    act(cx, keyprompter::app::DuplicateCard);
+    act(cx, keyprompter::app::EditCard::Duplicate);
     assert_eq!(cues(cx, &view), ["a", "a", "b"]);
     press(cx, handle, "cmd-z");
     assert_eq!(cues(cx, &view), ["a", "b"]);
@@ -259,10 +259,10 @@ async fn undo_never_hands_out_a_discarded_card_id_again(cx: &mut TestAppContext)
     let ids = |cx: &mut TestAppContext| {
         cx.read_entity(&view, |v, _| v.document().unwrap().rundown().card_ids())
     };
-    act(cx, keyprompter::app::DuplicateCard);
+    act(cx, keyprompter::app::EditCard::Duplicate);
     let first_copy = ids(cx)[1];
     act(cx, keyprompter::app::Undo);
-    act(cx, keyprompter::app::DuplicateCard);
+    act(cx, keyprompter::app::EditCard::Duplicate);
     assert_ne!(ids(cx)[1], first_copy);
 }
 

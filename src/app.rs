@@ -1,4 +1,6 @@
 use gpui_kit::*;
+use schemars::JsonSchema;
+use serde::Deserialize;
 
 use std::{
     path::{Path, PathBuf},
@@ -25,11 +27,6 @@ actions!(
         Export,
         Undo,
         Redo,
-        DuplicateCard,
-        MergeWithNextCard,
-        MoveCardEarlier,
-        MoveCardLater,
-        DeleteCard,
         ToggleCapture,
         MoveToTop,
         BiggerText,
@@ -41,6 +38,50 @@ actions!(
         ShowAll
     ]
 );
+
+/// A change to the current card, offered by the Card menu and by a right-click.
+#[derive(Clone, Copy, PartialEq, Debug, Deserialize, JsonSchema, Action)]
+#[action(namespace = keyprompter)]
+pub enum EditCard {
+    Duplicate,
+    MergeWithNext,
+    MoveEarlier,
+    MoveLater,
+    Delete,
+}
+
+/// Both card menus in order; `None` is a separator.
+pub const CARD_MENU: &[Option<EditCard>] = &[
+    Some(EditCard::Duplicate),
+    Some(EditCard::MergeWithNext),
+    None,
+    Some(EditCard::MoveEarlier),
+    Some(EditCard::MoveLater),
+    None,
+    Some(EditCard::Delete),
+];
+
+impl EditCard {
+    pub fn title(self) -> &'static str {
+        match self {
+            EditCard::Duplicate => "Duplicate Card",
+            EditCard::MergeWithNext => "Merge with Next Card",
+            EditCard::MoveEarlier => "Move Card Earlier",
+            EditCard::MoveLater => "Move Card Later",
+            EditCard::Delete => "Delete Card",
+        }
+    }
+
+    pub fn edit(self, card: CardId) -> Edit {
+        match self {
+            EditCard::Duplicate => Edit::Duplicate(card),
+            EditCard::MergeWithNext => Edit::MergeWithNext(card),
+            EditCard::MoveEarlier => Edit::MoveEarlier(card),
+            EditCard::MoveLater => Edit::MoveLater(card),
+            EditCard::Delete => Edit::Delete(card),
+        }
+    }
+}
 
 /// Opens a library rundown by id. Not by menu position: saving reorders the list.
 #[derive(Clone, PartialEq, Action)]
@@ -134,15 +175,12 @@ pub fn menus(capture: Capture, screens: &[String], recent: &[Entry]) -> Vec<Menu
         },
         Menu {
             name: "Card".into(),
-            items: vec![
-                MenuItem::action("Duplicate Card", DuplicateCard),
-                MenuItem::action("Merge with Next Card", MergeWithNextCard),
-                MenuItem::separator(),
-                MenuItem::action("Move Card Earlier", MoveCardEarlier),
-                MenuItem::action("Move Card Later", MoveCardLater),
-                MenuItem::separator(),
-                MenuItem::action("Delete Card", DeleteCard),
-            ],
+            items: CARD_MENU
+                .iter()
+                .map(|item| {
+                    item.map_or(MenuItem::separator(), |op| MenuItem::action(op.title(), op))
+                })
+                .collect(),
             disabled: false,
         },
         Menu {
@@ -207,15 +245,10 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
     route::<First>(&view, Command::First, cx);
     route::<Last>(&view, Command::Last, cx);
 
-    fn edit<A: Action>(view: &Entity<StageView>, edit: fn(CardId) -> Edit, cx: &mut App) {
+    cx.on_action({
         let view = view.clone();
-        cx.on_action(move |_: &A, cx| view.update(cx, |v, cx| v.edit(edit, cx)));
-    }
-    edit::<DuplicateCard>(&view, Edit::Duplicate, cx);
-    edit::<MergeWithNextCard>(&view, Edit::MergeWithNext, cx);
-    edit::<MoveCardEarlier>(&view, Edit::MoveEarlier, cx);
-    edit::<MoveCardLater>(&view, Edit::MoveLater, cx);
-    edit::<DeleteCard>(&view, Edit::Delete, cx);
+        move |op: &EditCard, cx| view.update(cx, |v, cx| v.edit(*op, cx))
+    });
     cx.on_action({
         let view = view.clone();
         move |_: &Undo, cx| view.update(cx, |v, cx| v.undo(cx))

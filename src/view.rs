@@ -6,13 +6,13 @@ use std::{
 use gpui_kit::*;
 
 use crate::{
-    app,
+    app::{self, CARD_MENU, EditCard},
     deck::{Slide, Span},
     document::Document,
     layout::{self, CardLayout, LINE_HEIGHT, Mark, TypeScale},
     library::Library,
     platform,
-    rundown::{CardId, Edit, Rundown},
+    rundown::Rundown,
     show::{Command, Show, format_elapsed},
     stage::{ease, slot},
     state::{self, Capture, Frame, State},
@@ -23,20 +23,6 @@ const MAX_CARD_W: f32 = 420.0;
 const CARD_VPAD: f32 = 12.0;
 const CARD_PAD: f32 = 10.0;
 const SNAP_REACH: f32 = 24.0;
-
-/// A card edit that a menu item applies to the card it names.
-type CardEdit = fn(CardId) -> Edit;
-
-/// The right-click menu of a card; `None` is a separator.
-const CARD_MENU: &[Option<(&str, CardEdit)>] = &[
-    Some(("Duplicate Card", Edit::Duplicate)),
-    Some(("Merge with Next Card", Edit::MergeWithNext)),
-    None,
-    Some(("Move Card Earlier", Edit::MoveEarlier)),
-    Some(("Move Card Later", Edit::MoveLater)),
-    None,
-    Some(("Delete Card", Edit::Delete)),
-];
 
 struct Theme {
     bg: Hsla,
@@ -215,9 +201,12 @@ impl StageView {
     }
 
     /// Applies an edit to the current card, saves, and shows the card it focuses.
-    pub fn edit(&mut self, edit: fn(CardId) -> Edit, cx: &mut Context<Self>) {
+    pub fn edit(&mut self, op: EditCard, cx: &mut Context<Self>) {
         let cursor = self.show.cursor();
-        let focus = self.document.as_mut().and_then(|d| d.edit(cursor, edit));
+        let focus = self
+            .document
+            .as_mut()
+            .and_then(|d| d.edit(cursor, |card| op.edit(card)));
         self.settle(focus, cx);
     }
 
@@ -260,14 +249,17 @@ impl StageView {
         let Some(ns_view) = platform::ns_view(window) else {
             return;
         };
-        let titles: Vec<_> = CARD_MENU.iter().map(|item| item.map(|(t, _)| t)).collect();
+        let titles: Vec<_> = CARD_MENU
+            .iter()
+            .map(|item| item.map(EditCard::title))
+            .collect();
         // A spawned task runs outside any GPUI update, which the menu's own
         // event loop needs.
         cx.spawn_in(window, async move |this, cx| {
             let chosen =
                 platform::context_menu(&ns_view, &titles, (f32::from(at.x), f32::from(at.y)));
-            if let Some((_, edit)) = chosen.and_then(|i| CARD_MENU[i]) {
-                this.update(cx, |v, cx| v.edit(edit, cx)).ok();
+            if let Some(op) = chosen.and_then(|i| CARD_MENU[i]) {
+                this.update(cx, |v, cx| v.edit(op, cx)).ok();
             }
         })
         .detach();
