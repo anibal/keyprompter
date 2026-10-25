@@ -227,3 +227,32 @@ async fn card_menu_edits_act_on_the_current_card_save_and_undo(cx: &mut TestAppC
         "undo and redo save too"
     );
 }
+
+#[gpui_kit::test]
+async fn cmd_z_on_the_strip_undoes_and_a_failed_save_error_clears_on_the_next_save(
+    cx: &mut TestAppContext,
+) {
+    let (handle, view) = open(cx, "## a\n## b\n");
+    act(cx, keyprompter::app::DuplicateCard);
+    assert_eq!(cues(cx, &view), ["a", "a", "b"]);
+    press(cx, handle, "cmd-z");
+    assert_eq!(cues(cx, &view), ["a", "b"]);
+    press(cx, handle, "shift-cmd-z");
+    assert_eq!(cues(cx, &view), ["a", "a", "b"]);
+    assert_eq!(
+        cx.read_entity(&view, |v, _| v.error().map(str::to_owned)),
+        None
+    );
+}
+
+#[gpui_kit::test]
+async fn undo_never_hands_out_a_discarded_card_id_again(cx: &mut TestAppContext) {
+    let (_, view) = open(cx, "## a\n");
+    let ids =
+        |cx: &mut TestAppContext| cx.read_entity(&view, |v, _| v.rundown().unwrap().1.card_ids());
+    act(cx, keyprompter::app::DuplicateCard);
+    let first_copy = ids(cx)[1];
+    act(cx, keyprompter::app::Undo);
+    act(cx, keyprompter::app::DuplicateCard);
+    assert_ne!(ids(cx)[1], first_copy);
+}

@@ -63,28 +63,25 @@ fn merge_turns_the_next_cue_into_a_bullet_and_keeps_its_body() {
     assert_eq!(merged.body, "- Three\nthree");
     assert_eq!(
         layout(&r),
-        sections(&[
-            (None, &["Open"]),
-            (Some("A"), &["One", "Two"]),
-            (Some("B"), &[])
-        ])
+        sections(&[(None, &["Open"]), (Some("A"), &["One", "Two"])]),
+        "B lost its only card, so it is gone"
     );
 }
 
 #[test]
 fn moving_past_a_section_edge_joins_the_neighbouring_section() {
     let mut r = Rundown::import(SHOW, "s");
-    let three = id(&r, "Three");
-    r.apply(Edit::MoveEarlier(three)).unwrap();
+    let one = id(&r, "One");
+    r.apply(Edit::MoveEarlier(one)).unwrap();
     assert_eq!(
         layout(&r),
         sections(&[
-            (None, &["Open"]),
-            (Some("A"), &["One", "Two", "Three"]),
-            (Some("B"), &[])
+            (None, &["Open", "One"]),
+            (Some("A"), &["Two"]),
+            (Some("B"), &["Three"])
         ])
     );
-    r.apply(Edit::MoveLater(three)).unwrap();
+    r.apply(Edit::MoveLater(one)).unwrap();
     assert_eq!(
         layout(&r),
         sections(&[
@@ -96,7 +93,7 @@ fn moving_past_a_section_edge_joins_the_neighbouring_section() {
 }
 
 #[test]
-fn an_emptied_untitled_section_disappears_so_only_the_first_can_be_untitled() {
+fn an_emptied_section_disappears_so_only_the_first_can_be_untitled() {
     let mut r = Rundown::import(SHOW, "s");
     r.apply(Edit::MoveLater(id(&r, "Open"))).unwrap();
     assert_eq!(
@@ -159,4 +156,18 @@ fn undo_and_redo_walk_back_and_forth_and_a_new_step_clears_redo() {
     assert_eq!(history.redo(1), Some(2));
     history.record(2);
     assert_eq!(history.redo(9), None);
+}
+
+#[test]
+fn merging_a_card_with_an_empty_cue_adds_no_stray_bullet() {
+    let mut r = Rundown::import("## a\nbody a\n## \nbody b\n", "s");
+    let a = r.card_ids()[0];
+    r.apply(Edit::MergeWithNext(a)).unwrap();
+    assert_eq!(r.sections[0].cards[0].body, "body a\nbody b");
+}
+
+#[test]
+fn import_drops_a_section_with_no_cards() {
+    let r = Rundown::import("# Empty\n# Real\n## card\n", "s");
+    assert_eq!(layout(&r), sections(&[(Some("Real"), &["card"])]));
 }

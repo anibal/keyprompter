@@ -19,6 +19,7 @@ pub struct Rundown {
 }
 
 /// Only the first section can be untitled: it holds the cards before any `#`.
+/// A section exists only while it has cards.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Section {
     pub title: Option<String>,
@@ -73,6 +74,7 @@ impl Rundown {
                 }
             }
         }
+        sections.retain(|section| !section.cards.is_empty());
         for card in sections.iter_mut().flat_map(|s| &mut s.cards) {
             card.body = card.body.trim().to_string();
         }
@@ -181,7 +183,12 @@ impl Rundown {
                 let gone = self.sections[ns].cards.remove(nc);
                 let (s, c) = self.position(id)?;
                 let body = &mut self.sections[s].cards[c].body;
-                let joined = [body.as_str(), &format!("- {}", gone.cue), &gone.body]
+                let cue = if gone.cue.is_empty() {
+                    String::new()
+                } else {
+                    format!("- {}", gone.cue)
+                };
+                let joined = [body.as_str(), &cue, &gone.body]
                     .into_iter()
                     .filter(|part| !part.is_empty())
                     .collect::<Vec<_>>()
@@ -225,8 +232,7 @@ impl Rundown {
                 focus
             }
         };
-        self.sections
-            .retain(|section| section.title.is_some() || !section.cards.is_empty());
+        self.sections.retain(|section| !section.cards.is_empty());
         Some(focus)
     }
 }

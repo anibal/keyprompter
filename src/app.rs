@@ -56,22 +56,26 @@ pub struct MoveToDisplay {
     pub index: usize,
 }
 
+/// Key context of the strip. Its bindings live there, so a focused text
+/// field's own bindings for the same keys win inside the field.
+pub const STRIP: &str = "Strip";
+
 /// The first binding of each action is the one its menu item shows.
 pub fn key_bindings() -> Vec<KeyBinding> {
     vec![
-        KeyBinding::new("right", Next, None),
-        KeyBinding::new("space", Next, None),
-        KeyBinding::new("pagedown", Next, None),
-        KeyBinding::new("down", Next, None),
-        KeyBinding::new("left", Prev, None),
-        KeyBinding::new("pageup", Prev, None),
-        KeyBinding::new("up", Prev, None),
-        KeyBinding::new("backspace", Prev, None),
-        KeyBinding::new("home", First, None),
-        KeyBinding::new("end", Last, None),
+        KeyBinding::new("right", Next, Some(STRIP)),
+        KeyBinding::new("space", Next, Some(STRIP)),
+        KeyBinding::new("pagedown", Next, Some(STRIP)),
+        KeyBinding::new("down", Next, Some(STRIP)),
+        KeyBinding::new("left", Prev, Some(STRIP)),
+        KeyBinding::new("pageup", Prev, Some(STRIP)),
+        KeyBinding::new("up", Prev, Some(STRIP)),
+        KeyBinding::new("backspace", Prev, Some(STRIP)),
+        KeyBinding::new("home", First, Some(STRIP)),
+        KeyBinding::new("end", Last, Some(STRIP)),
         KeyBinding::new("cmd-o", Import, None),
-        KeyBinding::new("cmd-z", Undo, None),
-        KeyBinding::new("shift-cmd-z", Redo, None),
+        KeyBinding::new("cmd-z", Undo, Some(STRIP)),
+        KeyBinding::new("shift-cmd-z", Redo, Some(STRIP)),
         KeyBinding::new("alt-cmd-up", MoveToTop, None),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-h", Hide, None),

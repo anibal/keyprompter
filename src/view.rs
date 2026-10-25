@@ -6,6 +6,7 @@ use std::{
 use gpui_kit::*;
 
 use crate::{
+    app,
     deck::Span,
     history::History,
     layout::{self, CardLayout, LINE_HEIGHT, Mark, TypeScale},
@@ -249,7 +250,9 @@ impl StageView {
         let Some((restored, focus)) = step(&mut self.history, (rundown.clone(), current)) else {
             return;
         };
+        let next_id = rundown.next_id.max(restored.next_id);
         *rundown = restored;
+        rundown.next_id = next_id;
         self.settle(focus, cx);
     }
 
@@ -258,9 +261,11 @@ impl StageView {
         let Some((id, rundown)) = &self.rundown else {
             return;
         };
-        if let Err(e) = self.library.save(id, rundown) {
-            self.error = Some(format!("Can't save: {e}"));
-        }
+        self.error = self
+            .library
+            .save(id, rundown)
+            .err()
+            .map(|e| format!("Can't save: {e}"));
         let index = focus.and_then(|f| rundown.card_ids().iter().position(|&i| i == f));
         let now = Instant::now();
         self.show.apply(Command::Reload(rundown.deck()), now);
@@ -563,6 +568,7 @@ impl Render for StageView {
 
         div()
             .id("root")
+            .key_context(app::STRIP)
             .track_focus(&self.focus)
             // The strip is a non-activating panel, so a click alone would leave the
             // previous app's menu bar showing.
