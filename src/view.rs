@@ -7,7 +7,8 @@ use std::{
 use gpui_kit::*;
 
 use crate::{
-    deck::{Block, Span, SpanStyle, parse},
+    deck::{Span, parse},
+    layout::{self, CardLayout, LINE_HEIGHT, Mark, TypeScale},
     platform,
     show::{Command, Show, format_elapsed},
     stage::{ease, slot},
@@ -17,6 +18,7 @@ use crate::{
 const COLUMN_W: f32 = 200.0;
 const MAX_CARD_W: f32 = 420.0;
 const CARD_VPAD: f32 = 12.0;
+const CARD_PAD: f32 = 10.0;
 const SNAP_REACH: f32 = 24.0;
 
 struct Theme {
@@ -64,6 +66,11 @@ pub struct StageView {
     state_path: Option<PathBuf>,
     saved: State,
     capture: Capture,
+    text_step: i32,
+    /// Bumped whenever the deck changes, so cached layouts know they are stale.
+    generation: u64,
+    layouts: Vec<CardLayout>,
+    layout_key: Option<(u64, TypeScale, f32)>,
     settling: Option<Task<()>>,
     _subscriptions: [Subscription; 3],
     _tick: Task<()>,
@@ -106,6 +113,10 @@ impl StageView {
             mtime: None,
             error: None,
             capture: saved.capture,
+            text_step: saved.text,
+            generation: 0,
+            layouts: Vec::new(),
+            layout_key: None,
             saved,
             state_path,
             settling: None,
@@ -134,6 +145,29 @@ impl StageView {
 
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
+    }
+
+    pub fn text_step(&self) -> i32 {
+        self.text_step
+    }
+
+    pub fn set_text_step(&mut self, step: i32, window: &Window, cx: &mut Context<Self>) {
+        self.text_step = step.clamp(layout::MIN_STEP, layout::MAX_STEP);
+        self.persist(window);
+        cx.notify();
+    }
+
+    /// The cards that don't fit, as `(slide index, hidden body lines)`.
+    pub fn overflowing(&self) -> Vec<(usize, usize)> {
+        let Some((_, scale, content_h)) = self.layout_key else {
+            return Vec::new();
+        };
+        self.layouts
+            .iter()
+            .enumerate()
+            .map(|(i, card)| (i, card.hidden_body(scale, content_h)))
+            .filter(|&(_, hidden)| hidden > 0)
+            .collect()
     }
 
     pub fn capture(&self) -> Capture {
@@ -203,6 +237,7 @@ impl StageView {
             Ok(Some((modified, text))) => {
                 self.mtime = Some(modified);
                 self.error = None;
+                self.generation += 1;
                 self.show
                     .apply(Command::Reload(parse(&text)), Instant::now());
             }
@@ -222,6 +257,7 @@ impl StageView {
             frame: Some(frame),
             deck: self.source.clone(),
             capture: self.capture,
+            text: self.text_step,
         };
         if self.saved != current
             && let Some(path) = &self.state_path
@@ -251,33 +287,13 @@ fn wall_clock() -> String {
 }
 
 fn rich(spans: &[Span], color: Hsla, code_bg: Hsla, window: &Window) -> StyledText {
-    let base = window.text_style().font();
     let text: String = spans.iter().map(|s| s.text.as_str()).collect();
-    let runs = spans
-        .iter()
-        .map(|s| {
-            let mut font = base.clone();
-            let mut background_color = None;
-            match s.style {
-                SpanStyle::Plain => {}
-                SpanStyle::Bold => font.weight = FontWeight::BOLD,
-                SpanStyle::Italic => font.style = FontStyle::Italic,
-                SpanStyle::Code => {
-                    font.family = "Menlo".into();
-                    background_color = Some(code_bg);
-                }
-            }
-            TextRun {
-                len: s.text.len(),
-                font,
-                color,
-                background_color,
-                underline: None,
-                strikethrough: None,
-            }
-        })
-        .collect();
-    StyledText::new(text).with_runs(runs)
+    StyledText::new(text).with_runs(layout::runs(
+        spans,
+        &window.text_style().font(),
+        color,
+        code_bg,
+    ))
 }
 
 impl Render for StageView {
@@ -305,12 +321,24 @@ impl Render for StageView {
         let card_w = MAX_CARD_W.min(win_w * 0.3);
         let card_h = win_h - CARD_VPAD;
 
+        let content_h = card_h - 2.0 * CARD_PAD;
+        let scale = TypeScale::new(content_h, self.text_step);
+        let key = (self.generation, scale, content_h);
+        if self.layout_key != Some(key) {
+            self.layouts = self
+                .show
+                .slides()
+                .iter()
+                .map(|slide| layout::layout(slide, scale, card_w - 2.0 * CARD_PAD, window))
+                .collect();
+            self.layout_key = Some(key);
+        }
+
         let cards: Vec<_> = self
-            .show
-            .slides()
+            .layouts
             .iter()
             .enumerate()
-            .filter_map(|(i, slide)| {
+            .filter_map(|(i, card)| {
                 let d = i as f32 - self.pos;
                 let s = slot(d);
                 let (w, h) = (card_w * s.scale, card_h * s.scale);
@@ -318,20 +346,52 @@ impl Render for StageView {
                 if s.opacity <= 0.0 || center + w / 2.0 < 0.0 || center - w / 2.0 > stage_w {
                     return None;
                 }
-                let pad = 10.0 * s.scale;
-                let body_px = 14.0 * s.scale;
-                let blocks = slide.body.iter().map(|block| match block {
-                    Block::Bullet(spans) => div()
+                let cue_h = scale.cue * LINE_HEIGHT * s.scale;
+                let body_h = scale.body * LINE_HEIGHT * s.scale;
+                let visible = card.visible_body(scale, content_h);
+                let hidden = card.body.len() - visible;
+                let cue = card.cue.iter().map(|line| {
+                    div()
+                        .h(px(cue_h))
+                        .line_height(px(cue_h))
+                        .text_size(px(scale.cue * s.scale))
+                        .font_weight(FontWeight::BOLD)
+                        .whitespace_nowrap()
+                        .child(line.clone())
+                });
+                let body = card.body[..visible].iter().map(|line| {
+                    let marker = match line.mark {
+                        Mark::None => None,
+                        Mark::Bullet => Some("•"),
+                        Mark::Hang => Some(""),
+                    };
+                    div()
                         .flex()
-                        .gap(px(6.0 * s.scale))
-                        .child(div().text_color(t.accent).child("•"))
-                        .child(
+                        .h(px(body_h))
+                        .line_height(px(body_h))
+                        .text_size(px(scale.body * s.scale))
+                        .whitespace_nowrap()
+                        .children(marker.map(|m| {
                             div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(rich(spans, t.fg, t.code_bg, window)),
-                        ),
-                    Block::Para(spans) => div().child(rich(spans, t.fg, t.code_bg, window)),
+                                .w(px(scale.indent() * s.scale))
+                                .flex_none()
+                                .text_color(t.accent)
+                                .child(m)
+                        }))
+                        .child(rich(&line.spans, t.fg, t.code_bg, window))
+                });
+                let more = (hidden > 0).then(|| {
+                    div()
+                        .absolute()
+                        .right(px(CARD_PAD * s.scale))
+                        .bottom(px(4.0 * s.scale))
+                        .px(px(6.0 * s.scale))
+                        .rounded(px(6.0 * s.scale))
+                        .bg(t.error)
+                        .text_color(t.bg.opacity(1.0))
+                        .text_size(px(scale.body * 0.75 * s.scale))
+                        .font_weight(FontWeight::BOLD)
+                        .child(format!("+{hidden}"))
                 });
                 Some(
                     div()
@@ -341,25 +401,19 @@ impl Render for StageView {
                         .top(px((win_h - h) / 2.0))
                         .w(px(w))
                         .h(px(h))
-                        .p(px(pad))
+                        .p(px(CARD_PAD * s.scale))
                         .overflow_hidden()
                         .rounded(px(10.0 * s.scale))
                         .border_2()
                         .border_color(t.accent.opacity((1.0 - d.abs()).max(0.0)))
                         .bg(t.card)
                         .opacity(s.opacity)
-                        .text_size(px(body_px))
                         .text_color(t.fg)
                         .flex()
                         .flex_col()
-                        .gap(px(3.0 * s.scale))
-                        .child(
-                            div()
-                                .text_size(px(20.0 * s.scale))
-                                .font_weight(FontWeight::BOLD)
-                                .child(slide.cue.clone()),
-                        )
-                        .children(blocks),
+                        .children(cue)
+                        .children(body)
+                        .children(more),
                 )
             })
             .collect();
@@ -376,6 +430,11 @@ impl Render for StageView {
             .unwrap_or_default();
         let position = (!self.show.slides().is_empty())
             .then(|| format!("{} / {}", self.show.cursor() + 1, self.show.slides().len()));
+        let overflow_note = match self.overflowing().as_slice() {
+            [] => None,
+            [(i, _)] => Some(format!("Card {} doesn't fit", i + 1)),
+            many => Some(format!("{} cards don't fit", many.len())),
+        };
         let column = div()
             .w(px(COLUMN_W))
             .h_full()
@@ -411,6 +470,13 @@ impl Render for StageView {
                     .truncate()
                     .child(file_name),
             )
+            .children(overflow_note.map(|note| {
+                div()
+                    .text_size(px(11.0))
+                    .text_color(t.error)
+                    .truncate()
+                    .child(note)
+            }))
             .children(self.error.as_ref().map(|e| {
                 div()
                     .text_size(px(11.0))

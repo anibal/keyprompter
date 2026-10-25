@@ -1,6 +1,7 @@
 pub mod app;
 pub mod deck;
 pub mod hotkeys;
+pub mod layout;
 pub mod platform;
 pub mod show;
 pub mod snap;

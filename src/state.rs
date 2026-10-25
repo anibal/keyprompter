@@ -32,6 +32,8 @@ pub struct State {
     pub frame: Option<Frame>,
     pub deck: Option<PathBuf>,
     pub capture: Capture,
+    /// Text-size steps away from the size the strip height gives.
+    pub text: i32,
 }
 
 /// Whether screen captures and recordings include the strip.
@@ -50,6 +52,7 @@ impl State {
                 "frame" => state.frame = Frame::parse(value),
                 "deck" if !value.is_empty() => state.deck = Some(PathBuf::from(value)),
                 "capture" if value == "shown" => state.capture = Capture::Shown,
+                "text" => state.text = value.parse().unwrap_or(0),
                 _ => {}
             }
         }
@@ -66,6 +69,9 @@ impl State {
         }
         if self.capture == Capture::Shown {
             out += "capture shown\n";
+        }
+        if self.text != 0 {
+            out += &format!("text {}\n", self.text);
         }
         out
     }

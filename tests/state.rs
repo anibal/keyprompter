@@ -15,6 +15,7 @@ fn state_round_trips_through_the_file() {
         }),
         deck: Some(PathBuf::from("/Users/me/My Shows/rundown.md")),
         capture: Capture::Shown,
+        text: -2,
     };
     save(&path, &state).unwrap();
     assert_eq!(load(&path), state);

@@ -14,6 +14,9 @@ actions!(
         Open,
         ToggleCapture,
         MoveToTop,
+        BiggerText,
+        SmallerText,
+        DefaultTextSize,
         Quit,
         Hide,
         HideOthers,
@@ -72,6 +75,10 @@ pub fn menus(capture: Capture, screens: &[String]) -> Vec<Menu> {
             items: vec![
                 MenuItem::action("Hide from Screen Capture", ToggleCapture)
                     .checked(capture == Capture::Hidden),
+                MenuItem::separator(),
+                MenuItem::action("Bigger Text", BiggerText),
+                MenuItem::action("Smaller Text", SmallerText),
+                MenuItem::action("Default Text Size", DefaultTextSize),
                 MenuItem::separator(),
                 MenuItem::action("Move to Top of Screen", MoveToTop),
                 MenuItem::submenu(Menu {
@@ -149,6 +156,27 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, cx: &mut App) {
                 .ok();
         }
     };
+    let text_step = {
+        let view = view.clone();
+        move |change: fn(i32) -> i32, cx: &mut App| {
+            window
+                .update(cx, |_, window, cx| {
+                    view.update(cx, |v, cx| {
+                        v.set_text_step(change(v.text_step()), window, cx)
+                    })
+                })
+                .ok();
+        }
+    };
+    cx.on_action({
+        let text_step = text_step.clone();
+        move |_: &BiggerText, cx| text_step(|s| s + 1, cx)
+    });
+    cx.on_action({
+        let text_step = text_step.clone();
+        move |_: &SmallerText, cx| text_step(|s| s - 1, cx)
+    });
+    cx.on_action(move |_: &DefaultTextSize, cx| text_step(|_| 0, cx));
     cx.on_action({
         let move_to_top = move_to_top.clone();
         move |_: &MoveToTop, cx| move_to_top(None, cx)
