@@ -214,7 +214,6 @@ impl StageView {
         cx.notify();
     }
 
-    /// Applies an edit to the current card, saves, and shows the card it focuses.
     /// Applies a card command to the card in the hot spot.
     pub fn edit(&mut self, op: EditCard, cx: &mut Context<Self>) {
         self.edit_at(self.show.cursor(), op, cx);
