@@ -113,6 +113,7 @@ impl Rundown {
                 .iter()
                 .flat_map(|section| {
                     section.cards.iter().map(|card| Slide {
+                        id: card.id,
                         section: section.title.clone(),
                         cue: card.cue.clone(),
                         body: deck::parse_body(&card.body),

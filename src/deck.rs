@@ -1,3 +1,5 @@
+use crate::rundown::CardId;
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Deck {
     pub slides: Vec<Slide>,
@@ -5,6 +7,7 @@ pub struct Deck {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Slide {
+    pub id: CardId,
     pub section: Option<String>,
     pub cue: String,
     pub body: Vec<Block>,

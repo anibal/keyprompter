@@ -4,6 +4,7 @@ pub mod document;
 pub mod hotkeys;
 pub mod layout;
 pub mod library;
+pub mod motion;
 pub mod platform;
 pub mod rundown;
 pub mod show;

@@ -11,6 +11,7 @@ use crate::{
     document::Document,
     layout::{self, CardLayout, LINE_HEIGHT, Mark, TypeScale},
     library::Library,
+    motion::{Before, Motion},
     platform,
     rundown::Rundown,
     show::{Command, Show, format_elapsed},
@@ -76,6 +77,7 @@ pub struct StageView {
     capture: Capture,
     text_step: i32,
     layouts: Vec<CardLayout>,
+    motion: Motion<CardLayout>,
     /// What `layouts` were laid out for. `None` once the deck has changed.
     layout_key: Option<(TypeScale, f32)>,
     content_h: f32,
@@ -124,6 +126,7 @@ impl StageView {
             capture: saved.capture,
             text_step: saved.text.clamp(layout::MIN_STEP, layout::MAX_STEP),
             layouts: Vec::new(),
+            motion: Motion::default(),
             layout_key: None,
             content_h: 0.0,
             saved,
@@ -199,6 +202,7 @@ impl StageView {
     pub fn open(&mut self, id: String, rundown: Rundown, window: &Window, cx: &mut Context<Self>) {
         self.document = Some(Document::new(id, rundown));
         self.show = Show::default();
+        self.motion.clear();
         self.layout_key = None;
         self.error = None;
         self.persist(window);
@@ -208,29 +212,72 @@ impl StageView {
 
     /// Applies an edit to the current card, saves, and shows the card it focuses.
     pub fn edit(&mut self, op: EditCard, cx: &mut Context<Self>) {
-        let cursor = self.show.cursor();
-        let focus = self
-            .document
-            .as_mut()
-            .and_then(|d| d.edit(cursor, op.title(), |card| op.edit(card)));
-        self.settle(focus, cx);
+        let merge = op == EditCard::MergeWithNext;
+        self.change(
+            merge,
+            |d, at| d.edit(at, op.title(), |card| op.edit(card)),
+            cx,
+        );
     }
 
     pub fn undo(&mut self, cx: &mut Context<Self>) {
-        let cursor = self.show.cursor();
-        let focus = self.document.as_mut().and_then(|d| d.undo(cursor));
-        self.settle(focus, cx);
+        self.change(false, Document::undo, cx);
     }
 
     pub fn redo(&mut self, cx: &mut Context<Self>) {
+        self.change(false, Document::redo, cx);
+    }
+
+    /// Applies `change` at the current card, animates from the old deck to the
+    /// new one, saves, and shows the card it focuses. With `merge`, cards that
+    /// go away slide into the current card.
+    fn change(
+        &mut self,
+        merge: bool,
+        change: impl FnOnce(&mut Document, usize) -> Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
         let cursor = self.show.cursor();
-        let focus = self.document.as_mut().and_then(|d| d.redo(cursor));
+        let Some(document) = &mut self.document else {
+            return;
+        };
+        let before = document.deck().slides.clone();
+        let Some(focus) = change(document, cursor) else {
+            return;
+        };
+        let after = &document.deck().slides;
+        let ids: Vec<_> = after.iter().map(|s| s.id).collect();
+        let layouts = std::mem::take(&mut self.layouts);
+        let lines = |i: usize| layouts.get(i).map_or(0, |l: &CardLayout| l.body.len());
+        // New text glows from where the old text ended. A card that only
+        // changed section glows its whole body, since nothing else moves.
+        let changed: Vec<_> = after
+            .iter()
+            .filter_map(|s| {
+                let (i, b) = before.iter().enumerate().find(|(_, b)| b.id == s.id)?;
+                if b.cue != s.cue || b.body != s.body {
+                    Some((s.id, lines(i)))
+                } else {
+                    (b.section != s.section).then_some((s.id, 0))
+                }
+            })
+            .collect();
+        let into = merge.then(|| before.get(cursor).map(|s| s.id)).flatten();
+        let mut layouts = layouts.into_iter();
+        let before = before
+            .iter()
+            .map(|slide| Before {
+                id: slide.id,
+                card: layouts.next().unwrap_or_default(),
+            })
+            .collect();
+        self.motion.change(before, &ids, &changed, into);
         self.settle(focus, cx);
     }
 
     /// After a change to the document, saves it and shows the card at `focus`.
-    fn settle(&mut self, focus: Option<usize>, cx: &mut Context<Self>) {
-        let (Some(focus), Some(document)) = (focus, &self.document) else {
+    fn settle(&mut self, focus: usize, cx: &mut Context<Self>) {
+        let Some(document) = &self.document else {
             return;
         };
         self.error = self
@@ -344,6 +391,123 @@ fn wall_clock() -> String {
     format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
 }
 
+/// Where cards go on the strip and how big their text is.
+struct Geometry {
+    hot_x: f32,
+    stage_w: f32,
+    card_w: f32,
+    card_h: f32,
+    win_h: f32,
+    scale: TypeScale,
+    content_h: f32,
+}
+
+/// How one card is drawn this frame.
+struct Appearance {
+    /// Distance from the hot spot, in slide indices.
+    d: f32,
+    opacity: f32,
+    /// Extra scale on top of the card's slot, for cards coming and going.
+    shrink: f32,
+    /// Body lines from the first number on glow at the second's strength.
+    glow: (usize, f32),
+}
+
+/// A card at its slot, or `None` when it is off the strip or invisible.
+fn card(
+    g: &Geometry,
+    layout: &CardLayout,
+    look: Appearance,
+    t: &Theme,
+    window: &Window,
+) -> Option<Div> {
+    let s = slot(look.d);
+    let size = s.scale * look.shrink;
+    let opacity = s.opacity * look.opacity;
+    let (w, h) = (g.card_w * size, g.card_h * size);
+    let center = g.hot_x + s.x * g.card_w;
+    if opacity <= 0.0 || center + w / 2.0 < 0.0 || center - w / 2.0 > g.stage_w {
+        return None;
+    }
+    let scale = g.scale;
+    let cue_h = scale.cue * LINE_HEIGHT * size;
+    let body_h = scale.body * LINE_HEIGHT * size;
+    let fit = layout.fit(scale, g.content_h);
+    let cue = layout.cue[..fit.cue].iter().map(|line| {
+        div()
+            .h(px(cue_h))
+            .line_height(px(cue_h))
+            .text_size(px(scale.cue * size))
+            .font_weight(FontWeight::BOLD)
+            .whitespace_nowrap()
+            .child(line.clone())
+    });
+    let (glow_from, glow) = look.glow;
+    let body = layout.body[..fit.body].iter().enumerate().map(|(j, line)| {
+        let marker = match line.mark {
+            Mark::None => None,
+            Mark::Bullet => Some("•"),
+            Mark::Hang => Some(""),
+        };
+        let lit = if j >= glow_from { 0.3 * glow } else { 0.0 };
+        div()
+            .flex()
+            .h(px(body_h))
+            .line_height(px(body_h))
+            .text_size(px(scale.body * size))
+            .whitespace_nowrap()
+            .rounded(px(4.0 * size))
+            .bg(t.accent.opacity(lit))
+            .children(marker.map(|m| {
+                div()
+                    .w(px(scale.indent() * size))
+                    .flex_none()
+                    .text_color(t.accent)
+                    .child(m)
+            }))
+            .child(rich(&line.spans, t.fg, t.code_bg, window))
+    });
+    let more = (fit.hidden > 0).then(|| {
+        div()
+            .flex()
+            .justify_end()
+            .items_center()
+            .h(px(body_h))
+            .child(
+                div()
+                    .px(px(6.0 * size))
+                    .rounded(px(6.0 * size))
+                    .bg(t.error)
+                    .text_color(t.bg.opacity(1.0))
+                    .text_size(px(scale.body * 0.75 * size))
+                    .line_height(px(scale.body * 1.1 * size))
+                    .font_weight(FontWeight::BOLD)
+                    .child(format!("+{} lines", fit.hidden)),
+            )
+    });
+    Some(
+        div()
+            .absolute()
+            .left(px(center - w / 2.0))
+            .top(px((g.win_h - h) / 2.0))
+            .w(px(w))
+            .h(px(h))
+            .p(px(CARD_PAD * size))
+            .overflow_hidden()
+            .rounded(px(10.0 * size))
+            .border_2()
+            .border_color(t.accent.opacity((1.0 - look.d.abs()).max(0.0)))
+            .bg(t.card)
+            .opacity(opacity)
+            .text_color(t.fg)
+            .flex()
+            .flex_col()
+            .children(cue)
+            .children(body)
+            .children(more),
+    )
+}
+
 fn rich(spans: &[Span], color: Hsla, code_bg: Hsla, window: &Window) -> StyledText {
     let text: String = spans.iter().map(|s| s.text.as_str()).collect();
     StyledText::new(text).with_runs(layout::runs(
@@ -361,13 +525,16 @@ impl Render for StageView {
         let dt = self
             .last_frame
             .map_or(0.0, |t| (now - t).as_secs_f32().min(0.05));
-        self.pos = if platform::reduce_motion() {
-            target
-        } else {
+        let slide = !platform::reduce_motion();
+        self.pos = if slide {
             ease(self.pos, target, dt)
+        } else {
+            target
         };
-        self.last_frame = (self.pos != target).then_some(now);
-        if self.pos != target {
+        let ids: Vec<_> = self.slides().iter().map(|s| s.id).collect();
+        let moving = self.motion.step(&ids, dt, slide) || self.pos != target;
+        self.last_frame = moving.then_some(now);
+        if moving {
             window.request_animation_frame();
         }
 
@@ -392,111 +559,65 @@ impl Render for StageView {
             self.layout_key = Some(key);
         }
 
-        let cards: Vec<_> = self
+        let geometry = Geometry {
+            hot_x,
+            stage_w,
+            card_w,
+            card_h,
+            win_h,
+            scale,
+            content_h,
+        };
+        let ghosts = self.motion.ghosts().iter().filter_map(|ghost| {
+            let shrink = if ghost.into.is_some() {
+                1.0
+            } else {
+                0.7 + 0.3 * ghost.fade
+            };
+            let look = Appearance {
+                d: ghost.rank - self.pos,
+                opacity: ghost.fade,
+                shrink,
+                glow: (0, 0.0),
+            };
+            card(&geometry, &ghost.card, look, &t, window).map(IntoElement::into_any_element)
+        });
+        let live = self
             .layouts
             .iter()
+            .zip(self.slides())
             .enumerate()
-            .filter_map(|(i, card)| {
-                let d = i as f32 - self.pos;
-                let s = slot(d);
-                let (w, h) = (card_w * s.scale, card_h * s.scale);
-                let center = hot_x + s.x * card_w;
-                if s.opacity <= 0.0 || center + w / 2.0 < 0.0 || center - w / 2.0 > stage_w {
-                    return None;
-                }
-                let cue_h = scale.cue * LINE_HEIGHT * s.scale;
-                let body_h = scale.body * LINE_HEIGHT * s.scale;
-                let fit = card.fit(scale, content_h);
-                let cue = card.cue[..fit.cue].iter().map(|line| {
-                    div()
-                        .h(px(cue_h))
-                        .line_height(px(cue_h))
-                        .text_size(px(scale.cue * s.scale))
-                        .font_weight(FontWeight::BOLD)
-                        .whitespace_nowrap()
-                        .child(line.clone())
-                });
-                let body = card.body[..fit.body].iter().map(|line| {
-                    let marker = match line.mark {
-                        Mark::None => None,
-                        Mark::Bullet => Some("•"),
-                        Mark::Hang => Some(""),
-                    };
-                    div()
-                        .flex()
-                        .h(px(body_h))
-                        .line_height(px(body_h))
-                        .text_size(px(scale.body * s.scale))
-                        .whitespace_nowrap()
-                        .children(marker.map(|m| {
-                            div()
-                                .w(px(scale.indent() * s.scale))
-                                .flex_none()
-                                .text_color(t.accent)
-                                .child(m)
-                        }))
-                        .child(rich(&line.spans, t.fg, t.code_bg, window))
-                });
-                let more = (fit.hidden > 0).then(|| {
-                    div()
-                        .flex()
-                        .justify_end()
-                        .items_center()
-                        .h(px(body_h))
-                        .child(
-                            div()
-                                .px(px(6.0 * s.scale))
-                                .rounded(px(6.0 * s.scale))
-                                .bg(t.error)
-                                .text_color(t.bg.opacity(1.0))
-                                .text_size(px(scale.body * 0.75 * s.scale))
-                                .line_height(px(scale.body * 1.1 * s.scale))
-                                .font_weight(FontWeight::BOLD)
-                                .child(format!("+{} lines", fit.hidden)),
-                        )
-                });
-                Some(
-                    div()
-                        .id(("slide", i))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _, _, cx| {
-                                // The current card lets the press through to
-                                // the strip, which drags the window.
-                                if i != this.show.cursor() {
-                                    cx.stop_propagation();
-                                    cx.activate(true);
-                                    this.command(Command::Goto(i), cx);
-                                }
-                            }),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Right,
-                            cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                                this.card_menu(i, e.position, window, cx)
-                            }),
-                        )
-                        .absolute()
-                        .left(px(center - w / 2.0))
-                        .top(px((win_h - h) / 2.0))
-                        .w(px(w))
-                        .h(px(h))
-                        .p(px(CARD_PAD * s.scale))
-                        .overflow_hidden()
-                        .rounded(px(10.0 * s.scale))
-                        .border_2()
-                        .border_color(t.accent.opacity((1.0 - d.abs()).max(0.0)))
-                        .bg(t.card)
-                        .opacity(s.opacity)
-                        .text_color(t.fg)
-                        .flex()
-                        .flex_col()
-                        .children(cue)
-                        .children(body)
-                        .children(more),
-                )
-            })
-            .collect();
+            .filter_map(|(i, (layout, slide))| {
+                let motion = self.motion.look(slide.id, i);
+                let look = Appearance {
+                    d: motion.rank - self.pos,
+                    opacity: motion.appear,
+                    shrink: 0.8 + 0.2 * motion.appear,
+                    glow: (motion.glow_from, motion.glow),
+                };
+                let element = card(&geometry, layout, look, &t, window)?
+                    .id(("slide", i))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, _, cx| {
+                            // The current card lets the press through to
+                            // the strip, which drags the window.
+                            if i != this.show.cursor() {
+                                cx.stop_propagation();
+                                cx.activate(true);
+                                this.command(Command::Goto(i), cx);
+                            }
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                            this.card_menu(i, e.position, window, cx)
+                        }),
+                    );
+                Some(element.into_any_element())
+            });
+        let cards: Vec<_> = ghosts.chain(live).collect();
 
         let slides = self.slides();
         let title = self
