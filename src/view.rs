@@ -325,7 +325,12 @@ impl Render for StageView {
                         .flex()
                         .gap(px(6.0 * s.scale))
                         .child(div().text_color(t.accent).child("•"))
-                        .child(div().flex_1().child(rich(spans, t.fg, t.code_bg, window))),
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(rich(spans, t.fg, t.code_bg, window)),
+                        ),
                     Block::Para(spans) => div().child(rich(spans, t.fg, t.code_bg, window)),
                 });
                 Some(
