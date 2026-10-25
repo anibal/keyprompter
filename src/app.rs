@@ -8,7 +8,7 @@ use std::{
 use crate::{
     library::{Entry, Library},
     platform,
-    rundown::Rundown,
+    rundown::{CardId, Edit, Rundown},
     show::Command,
     state::Capture,
     view::StageView,
@@ -23,6 +23,13 @@ actions!(
         Last,
         Import,
         Export,
+        Undo,
+        Redo,
+        DuplicateCard,
+        MergeWithNextCard,
+        MoveCardEarlier,
+        MoveCardLater,
+        DeleteCard,
         ToggleCapture,
         MoveToTop,
         BiggerText,
@@ -63,6 +70,8 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("home", First, None),
         KeyBinding::new("end", Last, None),
         KeyBinding::new("cmd-o", Import, None),
+        KeyBinding::new("cmd-z", Undo, None),
+        KeyBinding::new("shift-cmd-z", Redo, None),
         KeyBinding::new("alt-cmd-up", MoveToTop, None),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-h", Hide, None),
@@ -108,6 +117,27 @@ pub fn menus(capture: Capture, screens: &[String], recent: &[Entry]) -> Vec<Menu
                 }),
                 MenuItem::separator(),
                 MenuItem::action("Export Markdown…", Export),
+            ],
+            disabled: false,
+        },
+        Menu {
+            name: "Edit".into(),
+            items: vec![
+                MenuItem::action("Undo", Undo),
+                MenuItem::action("Redo", Redo),
+            ],
+            disabled: false,
+        },
+        Menu {
+            name: "Card".into(),
+            items: vec![
+                MenuItem::action("Duplicate Card", DuplicateCard),
+                MenuItem::action("Merge with Next Card", MergeWithNextCard),
+                MenuItem::separator(),
+                MenuItem::action("Move Card Earlier", MoveCardEarlier),
+                MenuItem::action("Move Card Later", MoveCardLater),
+                MenuItem::separator(),
+                MenuItem::action("Delete Card", DeleteCard),
             ],
             disabled: false,
         },
@@ -172,6 +202,24 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
     route::<Prev>(&view, Command::Prev, cx);
     route::<First>(&view, Command::First, cx);
     route::<Last>(&view, Command::Last, cx);
+
+    fn edit<A: Action>(view: &Entity<StageView>, edit: fn(CardId) -> Edit, cx: &mut App) {
+        let view = view.clone();
+        cx.on_action(move |_: &A, cx| view.update(cx, |v, cx| v.edit(edit, cx)));
+    }
+    edit::<DuplicateCard>(&view, Edit::Duplicate, cx);
+    edit::<MergeWithNextCard>(&view, Edit::MergeWithNext, cx);
+    edit::<MoveCardEarlier>(&view, Edit::MoveEarlier, cx);
+    edit::<MoveCardLater>(&view, Edit::MoveLater, cx);
+    edit::<DeleteCard>(&view, Edit::Delete, cx);
+    cx.on_action({
+        let view = view.clone();
+        move |_: &Undo, cx| view.update(cx, |v, cx| v.undo(cx))
+    });
+    cx.on_action({
+        let view = view.clone();
+        move |_: &Redo, cx| view.update(cx, |v, cx| v.redo(cx))
+    });
 
     cx.on_action({
         let (view, library) = (view.clone(), library.clone());

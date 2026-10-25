@@ -120,3 +120,113 @@ impl Rundown {
         }
     }
 }
+
+/// A change to one card, named by id so it stays valid across other edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Edit {
+    /// A copy goes right after the card.
+    Duplicate(CardId),
+    /// The next card's cue becomes a bullet and its body follows.
+    MergeWithNext(CardId),
+    /// Past the first card of a section, a card joins the end of the section before.
+    MoveEarlier(CardId),
+    /// Past the last card of a section, a card joins the start of the section after.
+    MoveLater(CardId),
+    /// Refused for the only card, so there is always one to edit.
+    Delete(CardId),
+}
+
+impl Rundown {
+    pub fn card_ids(&self) -> Vec<CardId> {
+        self.sections
+            .iter()
+            .flat_map(|s| s.cards.iter().map(|c| c.id))
+            .collect()
+    }
+
+    fn position(&self, id: CardId) -> Option<(usize, usize)> {
+        self.sections.iter().enumerate().find_map(|(s, section)| {
+            section
+                .cards
+                .iter()
+                .position(|c| c.id == id)
+                .map(|c| (s, c))
+        })
+    }
+
+    fn new_id(&mut self) -> CardId {
+        let id = CardId(self.next_id);
+        self.next_id += 1;
+        id
+    }
+
+    /// Applies `edit` and returns the card to show afterwards, or `None`
+    /// and no change when the edit doesn't apply.
+    pub fn apply(&mut self, edit: Edit) -> Option<CardId> {
+        let ids = self.card_ids();
+        let focus = match edit {
+            Edit::Duplicate(id) => {
+                let (s, c) = self.position(id)?;
+                let copy = Card {
+                    id: self.new_id(),
+                    ..self.sections[s].cards[c].clone()
+                };
+                let new = copy.id;
+                self.sections[s].cards.insert(c + 1, copy);
+                new
+            }
+            Edit::MergeWithNext(id) => {
+                let next = *ids.get(ids.iter().position(|&i| i == id)? + 1)?;
+                let (ns, nc) = self.position(next)?;
+                let gone = self.sections[ns].cards.remove(nc);
+                let (s, c) = self.position(id)?;
+                let body = &mut self.sections[s].cards[c].body;
+                let joined = [body.as_str(), &format!("- {}", gone.cue), &gone.body]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                *body = joined;
+                id
+            }
+            Edit::MoveEarlier(id) => {
+                let (s, c) = self.position(id)?;
+                if c > 0 {
+                    self.sections[s].cards.swap(c, c - 1);
+                } else {
+                    if s == 0 {
+                        return None;
+                    }
+                    let moved = self.sections[s].cards.remove(0);
+                    self.sections[s - 1].cards.push(moved);
+                }
+                id
+            }
+            Edit::MoveLater(id) => {
+                let (s, c) = self.position(id)?;
+                if c + 1 < self.sections[s].cards.len() {
+                    self.sections[s].cards.swap(c, c + 1);
+                } else {
+                    if s + 1 == self.sections.len() {
+                        return None;
+                    }
+                    let moved = self.sections[s].cards.remove(c);
+                    self.sections[s + 1].cards.insert(0, moved);
+                }
+                id
+            }
+            Edit::Delete(id) => {
+                let at = ids.iter().position(|&i| i == id)?;
+                let focus = *ids
+                    .get(at + 1)
+                    .or(at.checked_sub(1).and_then(|p| ids.get(p)))?;
+                let (s, c) = self.position(id)?;
+                self.sections[s].cards.remove(c);
+                focus
+            }
+        };
+        self.sections
+            .retain(|section| section.title.is_some() || !section.cards.is_empty());
+        Some(focus)
+    }
+}

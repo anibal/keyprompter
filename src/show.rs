@@ -15,6 +15,7 @@ pub enum Command {
     First,
     Last,
     Reload(Deck),
+    Goto(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +49,7 @@ impl Show {
                 self.timer = Timer::Idle;
             }
             Command::Last => self.cursor = last,
+            Command::Goto(index) => self.cursor = index.min(last),
             Command::Reload(deck) => {
                 self.deck = deck;
                 self.cursor = self.cursor.min(self.deck.slides.len().saturating_sub(1));

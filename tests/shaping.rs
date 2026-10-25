@@ -9,6 +9,7 @@ use gpui_kit::{
 use keyprompter::{
     deck::parse,
     layout::{CardLayout, Mark, TypeScale, layout},
+    library::Library,
     state::State,
     view::StageView,
 };
@@ -31,7 +32,18 @@ fn lay_out(markdown: &str, width: f32) -> CardLayout {
                 ..WindowOptions::default()
             },
             cx,
-            |window, cx| cx.new(|cx| StageView::new(None, State::default(), None, window, cx)),
+            |window, cx| {
+                cx.new(|cx| {
+                    StageView::new(
+                        None,
+                        Library::new(std::env::temp_dir().join("kp-shaping")),
+                        State::default(),
+                        None,
+                        window,
+                        cx,
+                    )
+                })
+            },
         )
         .unwrap()
     });

@@ -64,7 +64,11 @@ fn main() {
                 ..WindowOptions::default()
             },
             cx,
-            |window, cx| cx.new(|cx| StageView::new(restored, saved, state_path, window, cx)),
+            |window, cx| {
+                cx.new(|cx| {
+                    StageView::new(restored, library.clone(), saved, state_path, window, cx)
+                })
+            },
         )
         .expect("open window");
 

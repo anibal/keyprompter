@@ -1,5 +1,6 @@
 pub mod app;
 pub mod deck;
+pub mod history;
 pub mod hotkeys;
 pub mod layout;
 pub mod library;

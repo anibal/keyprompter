@@ -20,6 +20,14 @@ fn library() -> Library {
 }
 
 fn open(cx: &mut TestAppContext, deck: &str) -> (AnyWindowHandle, Entity<StageView>) {
+    open_in(cx, deck, library())
+}
+
+fn open_in(
+    cx: &mut TestAppContext,
+    deck: &str,
+    library: Library,
+) -> (AnyWindowHandle, Entity<StageView>) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         keyprompter::app::init(cx);
@@ -36,11 +44,15 @@ fn open(cx: &mut TestAppContext, deck: &str) -> (AnyWindowHandle, Entity<StageVi
                 ..WindowOptions::default()
             },
             cx,
-            |window, cx| cx.new(|cx| StageView::new(rundown, State::default(), None, window, cx)),
+            |window, cx| {
+                cx.new(|cx| {
+                    StageView::new(rundown, library.clone(), State::default(), None, window, cx)
+                })
+            },
         )
         .unwrap()
     });
-    cx.update(|cx| keyprompter::app::connect(opened.0, opened.1.clone(), library(), cx));
+    cx.update(|cx| keyprompter::app::connect(opened.0, opened.1.clone(), library, cx));
     cx.run_until_parked();
     opened
 }
@@ -157,4 +169,61 @@ async fn smaller_text_makes_an_overflowing_card_fit(cx: &mut TestAppContext) {
     cx.update(|cx| cx.dispatch_action(&keyprompter::app::DefaultTextSize));
     cx.run_until_parked();
     assert_eq!(cx.read_entity(&view, |v, _| v.text_step()), 0);
+}
+
+fn cues(cx: &mut TestAppContext, view: &Entity<StageView>) -> Vec<String> {
+    cx.read_entity(view, |v, _| {
+        v.rundown()
+            .unwrap()
+            .1
+            .sections
+            .iter()
+            .flat_map(|s| s.cards.iter().map(|c| c.cue.clone()))
+            .collect()
+    })
+}
+
+fn act(cx: &mut TestAppContext, action: impl gpui_kit::Action) {
+    cx.update(|cx| cx.dispatch_action(&action));
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+async fn card_menu_edits_act_on_the_current_card_save_and_undo(cx: &mut TestAppContext) {
+    use keyprompter::app::{DeleteCard, DuplicateCard, MoveCardLater, Redo, Undo};
+    let library = library();
+    let (handle, view) = open_in(cx, "## a\n## b\n## c\n", library.clone());
+    press(cx, handle, "right");
+
+    act(cx, DuplicateCard);
+    assert_eq!(cues(cx, &view), ["a", "b", "b", "c"]);
+    assert_eq!(
+        cx.read_entity(&view, |v, _| v.cursor()),
+        2,
+        "focus moves to the copy"
+    );
+    assert_eq!(library.load("test").unwrap().card_ids().len(), 4, "saved");
+
+    act(cx, MoveCardLater);
+    act(cx, DeleteCard);
+    assert_eq!(cues(cx, &view), ["a", "b", "c"]);
+
+    act(cx, Undo);
+    assert_eq!(cues(cx, &view), ["a", "b", "c", "b"]);
+    assert_eq!(
+        cx.read_entity(&view, |v, _| v.cursor()),
+        3,
+        "undo returns to the deleted card"
+    );
+    act(cx, Undo);
+    assert_eq!(cues(cx, &view), ["a", "b", "b", "c"]);
+    act(cx, Undo);
+    assert_eq!(cues(cx, &view), ["a", "b", "c"]);
+    act(cx, Redo);
+    assert_eq!(cues(cx, &view), ["a", "b", "b", "c"]);
+    assert_eq!(
+        library.load("test").unwrap().card_ids().len(),
+        4,
+        "undo and redo save too"
+    );
 }

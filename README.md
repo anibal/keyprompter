@@ -8,7 +8,7 @@ A cue strip for streaming. It shows "mini slides" at the top of the screen, near
 cargo run --release --offline -- path/to/rundown.md
 ```
 
-KeyPrompter keeps its rundowns in a library at `~/Library/Application Support/KeyPrompter/Rundowns/`. A Markdown file passed on the command line, opened from Finder, or picked with File > Import Markdown (⌘O) is imported into the library the first time. Opening the same file again reopens the library copy, so later changes to the Markdown file are not picked up. File > Open Recent switches between rundowns, and File > Export Markdown writes the current one back out. Without an argument it reopens the last rundown. Click the strip once to give it keyboard focus. Drag it to move it. Let go near a screen edge or the menu bar and it snaps flush. View > Move to Top of Screen puts it over the menu bar, closest to the webcam, and View > Move to Display sends it to the top of another screen. If its saved screen is gone at launch, it opens at the top of the main screen. The position, the open rundown and the view settings are saved in `~/Library/Application Support/KeyPrompter/state.txt`.
+KeyPrompter keeps its rundowns in a library at `~/Library/Application Support/KeyPrompter/Rundowns/`. A Markdown file passed on the command line, opened from Finder, or picked with File > Import Markdown (⌘O) is imported into the library the first time. Opening the same file again reopens the library copy, so later changes to the Markdown file are not picked up. File > Open Recent switches between rundowns, and File > Export Markdown writes the current one back out. The Card menu changes the card in the middle of the strip: Duplicate Card, Merge with Next Card (its cue becomes a bullet), Move Card Earlier or Later (past a section edge it joins the next section), and Delete Card. Every change is saved at once, and Edit > Undo (⌘Z) and Redo (⇧⌘Z) step through them. Without an argument it reopens the last rundown. Click the strip once to give it keyboard focus. Drag it to move it. Let go near a screen edge or the menu bar and it snaps flush. View > Move to Top of Screen puts it over the menu bar, closest to the webcam, and View > Move to Display sends it to the top of another screen. If its saved screen is gone at launch, it opens at the top of the main screen. The position, the open rundown and the view settings are saved in `~/Library/Application Support/KeyPrompter/state.txt`.
 
 | Key | Action |
 |---|---|
@@ -19,6 +19,7 @@ KeyPrompter keeps its rundowns in a library at `~/Library/Application Support/Ke
 | ⌃⌥→ / ⌃⌥← | Next / previous slide from any app, no focus needed |
 | ⌥⌘↑ | Move the strip to the very top of its screen, over the menu bar |
 | ⌘O | Import a Markdown rundown |
+| ⌘Z / ⇧⌘Z | Undo / redo a card change |
 | ⌘H | Hide |
 | ⌘Q | Quit |
 

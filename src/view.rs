@@ -7,9 +7,11 @@ use gpui_kit::*;
 
 use crate::{
     deck::Span,
+    history::History,
     layout::{self, CardLayout, LINE_HEIGHT, Mark, TypeScale},
+    library::Library,
     platform,
-    rundown::Rundown,
+    rundown::{CardId, Edit, Rundown},
     show::{Command, Show, format_elapsed},
     stage::{ease, slot},
     state::{self, Capture, Frame, State},
@@ -20,6 +22,9 @@ const MAX_CARD_W: f32 = 420.0;
 const CARD_VPAD: f32 = 12.0;
 const CARD_PAD: f32 = 10.0;
 const SNAP_REACH: f32 = 24.0;
+
+/// The rundown with the card that was current, for undo.
+type Snapshot = (Rundown, Option<CardId>);
 
 struct Theme {
     bg: Hsla,
@@ -62,6 +67,8 @@ pub struct StageView {
     last_frame: Option<Instant>,
     /// The open rundown and its library id.
     rundown: Option<(String, Rundown)>,
+    library: Library,
+    history: History<Snapshot>,
     error: Option<String>,
     state_path: Option<PathBuf>,
     saved: State,
@@ -80,6 +87,7 @@ pub struct StageView {
 impl StageView {
     pub fn new(
         rundown: Option<(String, Rundown)>,
+        library: Library,
         saved: State,
         state_path: Option<PathBuf>,
         window: &mut Window,
@@ -111,6 +119,8 @@ impl StageView {
             pos: 0.0,
             last_frame: None,
             rundown,
+            library,
+            history: History::default(),
             error: None,
             capture: saved.capture,
             text_step: saved.text.clamp(layout::MIN_STEP, layout::MAX_STEP),
@@ -191,9 +201,73 @@ impl StageView {
     pub fn open(&mut self, id: String, rundown: Rundown, window: &Window, cx: &mut Context<Self>) {
         self.show = Show::new(rundown.deck());
         self.rundown = Some((id, rundown));
+        self.history.clear();
         self.generation += 1;
         self.error = None;
         self.persist(window);
+        cx.notify();
+    }
+
+    /// The card in the middle of the strip.
+    pub fn current_card(&self) -> Option<CardId> {
+        let (_, rundown) = self.rundown.as_ref()?;
+        rundown.card_ids().get(self.show.cursor()).copied()
+    }
+
+    /// Applies an edit to the current card, saves, and shows the card it focuses.
+    pub fn edit(&mut self, edit: fn(CardId) -> Edit, cx: &mut Context<Self>) {
+        let before = self.current_card();
+        let (Some(id), Some((_, rundown))) = (before, &self.rundown) else {
+            return;
+        };
+        let mut next = rundown.clone();
+        let Some(focus) = next.apply(edit(id)) else {
+            return;
+        };
+        let previous = std::mem::replace(&mut self.rundown.as_mut().unwrap().1, next);
+        self.history.record((previous, before));
+        self.settle(Some(focus), cx);
+    }
+
+    pub fn undo(&mut self, cx: &mut Context<Self>) {
+        self.travel(History::undo, cx);
+    }
+
+    pub fn redo(&mut self, cx: &mut Context<Self>) {
+        self.travel(History::redo, cx);
+    }
+
+    fn travel(
+        &mut self,
+        step: fn(&mut History<Snapshot>, Snapshot) -> Option<Snapshot>,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self.current_card();
+        let Some((_, rundown)) = &mut self.rundown else {
+            return;
+        };
+        let Some((restored, focus)) = step(&mut self.history, (rundown.clone(), current)) else {
+            return;
+        };
+        *rundown = restored;
+        self.settle(focus, cx);
+    }
+
+    /// Saves the rundown after a change and keeps the strip on `focus`.
+    fn settle(&mut self, focus: Option<CardId>, cx: &mut Context<Self>) {
+        let Some((id, rundown)) = &self.rundown else {
+            return;
+        };
+        if let Err(e) = self.library.save(id, rundown) {
+            self.error = Some(format!("Can't save: {e}"));
+        }
+        let index = focus.and_then(|f| rundown.card_ids().iter().position(|&i| i == f));
+        let now = Instant::now();
+        self.show.apply(Command::Reload(rundown.deck()), now);
+        if let Some(index) = index {
+            self.show.apply(Command::Goto(index), now);
+        }
+        self.generation += 1;
         cx.notify();
     }
 
