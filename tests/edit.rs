@@ -127,7 +127,7 @@ fn edits_that_cannot_apply_change_nothing() {
         Edit::Duplicate(CardId(999), Side::After),
     ] {
         let mut copy = r.clone();
-        assert_eq!(copy.apply(edit), None, "{edit:?}");
+        assert_eq!(copy.apply(edit.clone()), None, "{edit:?}");
         assert_eq!(copy, r, "{edit:?}");
     }
     let mut lone = Rundown::import("## only\n", "s");
@@ -248,4 +248,77 @@ fn editing_another_card_leaves_the_hot_spot_unless_it_takes_the_hot_card() {
         "the hot card was merged away, so the card that took it shows"
     );
     assert_eq!(cues_of(&d), ["a", "c"]);
+}
+
+fn card(r: &Rundown, id: CardId) -> (String, String) {
+    let card = r
+        .sections
+        .iter()
+        .flat_map(|s| &s.cards)
+        .find(|c| c.id == id)
+        .unwrap();
+    (card.cue.clone(), card.body.clone())
+}
+
+#[test]
+fn set_text_changes_the_cue_and_body_and_keeps_the_id() {
+    let mut r = Rundown::import(SHOW, "s");
+    let one = id(&r, "One");
+    let ids = r.card_ids();
+    let focus = r
+        .apply(Edit::SetText(
+            one,
+            " Uno ".into(),
+            "- uno\n- dos\n\n".into(),
+        ))
+        .unwrap();
+    assert_eq!(focus, one);
+    assert_eq!(
+        card(&r, one),
+        ("Uno".to_string(), "- uno\n- dos".to_string())
+    );
+    assert_eq!(r.card_ids(), ids);
+}
+
+#[test]
+fn set_text_with_the_same_text_is_no_change() {
+    let mut r = Rundown::import(SHOW, "s");
+    let one = id(&r, "One");
+    let before = r.clone();
+    assert_eq!(
+        r.apply(Edit::SetText(one, "One".into(), "- one\n".into())),
+        None
+    );
+    assert_eq!(r, before);
+}
+
+#[test]
+fn set_text_refuses_an_empty_cue_and_an_unknown_card() {
+    let mut r = Rundown::import(SHOW, "s");
+    let one = id(&r, "One");
+    let before = r.clone();
+    assert_eq!(r.apply(Edit::SetText(one, "  ".into(), "x".into())), None);
+    assert_eq!(
+        r.apply(Edit::SetText(CardId(999), "x".into(), "x".into())),
+        None
+    );
+    assert_eq!(r, before);
+}
+
+#[test]
+fn set_text_is_one_labelled_undo_step() {
+    let mut d = Document::new("t".into(), Rundown::import(SHOW, "s"));
+    let one = id(d.rundown(), "One");
+    d.edit(1, 1, "Edit Card", |card, _| {
+        assert_eq!(card, one);
+        Edit::SetText(card, "Uno".into(), String::new())
+    })
+    .unwrap();
+    assert_eq!(d.undo_label(), Some("Edit Card"));
+    d.undo(1).unwrap();
+    assert_eq!(
+        card(d.rundown(), one),
+        ("One".to_string(), "- one".to_string())
+    );
+    assert_eq!(d.undo_label(), None);
 }
