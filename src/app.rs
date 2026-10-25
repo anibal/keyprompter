@@ -99,6 +99,12 @@ pub struct MoveToDisplay {
     pub index: usize,
 }
 
+/// Puts the strip at a screen-local `[x, top, w, h]` on the main screen. Not
+/// in any menu: the drive pipe sends it, as `SetFrame [0,400,700,150]`.
+#[derive(Clone, PartialEq, Debug, Deserialize, JsonSchema, Action)]
+#[action(namespace = keyprompter)]
+pub struct SetFrame(pub [f32; 4]);
+
 /// Key context of the strip. Its bindings live there, so a focused text
 /// field's own bindings for the same keys win inside the field.
 pub const STRIP: &str = "Strip";
@@ -319,6 +325,16 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Librar
         move |_: &MoveToTop, cx| move_to_top(None, cx)
     });
     cx.on_action(move |action: &MoveToDisplay, cx| move_to_top(Some(action.index), cx));
+    cx.on_action({
+        let view = view.clone();
+        move |action: &SetFrame, cx| {
+            window
+                .update(cx, |_, window, cx| {
+                    view.update(cx, |v, cx| v.set_frame(action.0, window, cx))
+                })
+                .ok();
+        }
+    });
     cx.on_action({
         let (view, library) = (view.clone(), library.clone());
         move |_: &Import, cx| {

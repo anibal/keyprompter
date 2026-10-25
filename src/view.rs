@@ -15,7 +15,7 @@ use crate::{
     platform,
     rundown::Rundown,
     show::{Command, Show, format_elapsed},
-    snap::{self, Drag, Gesture, Placement, Side, Widths},
+    snap::{self, Drag, Gesture, Placement, Rect, Side, Widths},
     stage::{ease, slot},
     state::{self, Capture, State},
 };
@@ -145,15 +145,11 @@ impl StageView {
         // macOS pulls a window under the menu bar when it first shows it, so
         // the saved placement goes back on once it is on screen.
         cx.on_next_frame(window, |this, window, cx| {
-            if let Some(frame) = this
-                .saved
-                .placement
-                .as_ref()
-                .and_then(|p| p.frame_on(&platform::screens()))
-            {
-                platform::set_frame(window, frame);
+            let saved = this.saved.placement.as_ref();
+            match saved.and_then(|p| p.frame_on(&platform::screens())) {
+                Some(frame) => place(frame, window, cx),
+                None => this.moved(window, cx),
             }
-            this.moved(window, cx);
         });
         view
     }
@@ -379,8 +375,8 @@ impl StageView {
                     .await;
             }
             this.update_in(cx, |this, window, cx| {
-                this.snap(window);
                 this.settling = None;
+                this.snap(window, cx);
                 this.persist(window, cx);
             })
             .ok();
@@ -389,7 +385,7 @@ impl StageView {
 
     /// Pulls the frame onto its magnets. A move step with the pointer where it
     /// is leaves only the magnets to act.
-    fn snap(&self, window: &Window) {
+    fn snap(&self, window: &Window, cx: &mut Context<Self>) {
         let Some(frame) = platform::frame(window) else {
             return;
         };
@@ -403,7 +399,7 @@ impl StageView {
         };
         let settled = snap::release(drag.step(at, false, &screens), &screens);
         if settled != frame {
-            platform::set_frame(window, settled);
+            place(settled, window, cx);
         }
     }
 
@@ -455,17 +451,46 @@ impl StageView {
                 top: 0.0,
                 ..placement
             };
-            platform::set_frame(window, placed.on(target));
+            place(placed.on(target), window, cx);
         }
-        // GPUI drops the bounds notification while the window is borrowed
-        // here, so save by hand.
-        self.persist(window, cx);
+    }
+
+    /// Puts the strip at a screen-local `[x, top, w, h]` on the main screen.
+    pub fn set_frame(
+        &mut self,
+        [x, top, w, h]: [f32; 4],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let screens = platform::screens();
+        let Some(main) = screens.first() else {
+            return;
+        };
+        let s = main.frame;
+        let frame = Rect {
+            x: s.x + x,
+            y: s.y + s.h - top - h,
+            w,
+            h,
+        };
+        place(frame, window, cx);
     }
 
     pub fn command(&mut self, cmd: Command, cx: &mut Context<Self>) {
         self.show.apply(cmd, self.slides().len(), Instant::now());
         cx.notify();
     }
+}
+
+/// Moves the strip to `frame` once this update ends. AppKit reports the new
+/// size to GPUI on the spot, but that report needs the window, which the
+/// update still holds, so the viewport is refreshed by hand. That also runs
+/// the bounds observers, which settle and save.
+fn place(frame: Rect, window: &Window, cx: &mut App) {
+    window.defer(cx, move |window, cx| {
+        platform::set_frame(window, frame);
+        window.bounds_changed(cx);
+    });
 }
 
 fn wall_clock() -> String {
@@ -638,8 +663,16 @@ impl Render for StageView {
         let view = window.viewport_size();
         let (win_w, win_h) = (f32::from(view.width), f32::from(view.height));
         let stage_w = win_w - COLUMN_W;
-        let hot_x = win_w / 2.0 - COLUMN_W;
         let card_w = snap::card_width(win_w);
+        // Read live, so the current card holds still on screen while the
+        // window slides under it.
+        let screens = platform::screens();
+        let hot_x = platform::frame(window)
+            .and_then(|f| {
+                let screen = snap::holding(f, &screens)?.frame;
+                Some(snap::hot_spot(f, screen, COLUMN_W, card_w))
+            })
+            .unwrap_or(win_w / 2.0 - COLUMN_W);
         let card_h = win_h - CARD_VPAD;
 
         let content_h = card_h - 2.0 * CARD_PAD;

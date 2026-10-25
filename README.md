@@ -1,6 +1,6 @@
 # KeyPrompter
 
-A cue strip for streaming. It shows "mini slides" at the top of the screen, near the webcam. The current slide sits at the horizontal middle. Upcoming slides wait on the right, and past slides shrink into a trail on the left.
+A cue strip for streaming. It shows "mini slides" at the top of the screen, near the webcam. The current slide sits under the webcam, at the screen's center, as far as the strip reaches. Upcoming slides wait on the right, and past slides shrink into a trail on the left.
 
 ## Run
 
