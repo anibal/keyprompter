@@ -165,120 +165,31 @@ pub fn runs(spans: &[Span], base: &Font, color: Hsla, code_bg: Hsla) -> Vec<Text
         .collect()
 }
 
-fn is_cjk(c: char) -> bool {
-    matches!(c,
-        '\u{3000}'..='\u{30FF}' | '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}'
-        | '\u{F900}'..='\u{FAFF}' | '\u{FF00}'..='\u{FFEF}')
-}
-
-/// Marks that never start a line in CJK text.
-fn no_break_before(c: char) -> bool {
-    matches!(
-        c,
-        '。' | '、'
-            | '，'
-            | '．'
-            | '！'
-            | '？'
-            | '：'
-            | '；'
-            | '」'
-            | '』'
-            | '）'
-            | '〕'
-            | '】'
-            | 'ー'
-    )
-}
-
-/// Byte offsets where each line after the first starts. Lines break after a
-/// space or between CJK characters, in reading order, so right-to-left text
-/// wraps the same way. A word wider than `width` on its own breaks between
-/// characters. `measure` gives the width of text in a span style.
-pub fn wrap(
-    spans: &[Span],
-    width: f32,
-    measure: &mut impl FnMut(&str, SpanStyle) -> f32,
-) -> Vec<usize> {
-    let text: String = spans.iter().map(|s| s.text.as_str()).collect();
-    let style_at = |i: usize| {
-        let mut end = 0;
-        spans
-            .iter()
-            .find(|s| {
-                end += s.text.len();
-                i < end
-            })
-            .map_or(SpanStyle::Plain, |s| s.style)
-    };
-    let mut width_of = |from: usize, to: usize| -> f32 {
-        let mut w = 0.0;
-        let mut at = from;
-        while at < to {
-            let style = style_at(at);
-            let mut end = at;
-            while end < to && style_at(end) == style {
-                end += text[end..].chars().next().map_or(1, char::len_utf8);
-            }
-            w += measure(&text[at..end], style);
-            at = end;
-        }
-        w
-    };
-
-    let chars: Vec<(usize, char)> = text.char_indices().collect();
-    let mut breaks: Vec<usize> = chars
-        .windows(2)
-        .filter(|w| {
-            let ((_, a), (_, b)) = (w[0], w[1]);
-            !b.is_whitespace()
-                && !no_break_before(b)
-                && (a.is_whitespace() || is_cjk(a) || is_cjk(b))
-        })
-        .map(|w| w[1].0)
-        .collect();
-    breaks.push(text.len());
-
-    let limit = width + 0.5;
-    let mut starts = Vec::new();
-    let mut line = 0;
-    let mut piece = 0;
-    for &end in &breaks {
-        let content_end = text[..end].trim_end().len();
-        if piece > line && width_of(line, content_end) > limit {
-            starts.push(piece);
-            line = piece;
-        }
-        while width_of(line, content_end) > limit {
-            let cut = text[line..content_end]
-                .char_indices()
-                .skip(1)
-                .map(|(i, _)| line + i)
-                .take_while(|&i| width_of(line, i) <= limit)
-                .last();
-            let Some(cut) = cut else { break };
-            starts.push(cut);
-            line = cut;
-        }
-        piece = end;
-    }
-    starts
-}
-
+/// Byte offsets where GPUI starts each wrapped line after the first. Sorted
+/// and kept inside the text, so right-to-left glyph order can't break `split`.
 fn line_starts(window: &Window, spans: &[Span], base: &Font, size: f32, width: f32) -> Vec<usize> {
-    let text_system = window.text_system();
-    wrap(spans, width, &mut |text, style| {
-        let piece = [Span {
-            text: text.to_string(),
-            style,
-        }];
-        let runs = runs(&piece, base, Hsla::default(), Hsla::default());
-        f32::from(
-            text_system
-                .shape_line(text.to_string().into(), px(size), &runs, None)
-                .width,
-        )
-    })
+    let text: String = spans.iter().map(|s| s.text.as_str()).collect();
+    let len = text.len();
+    let runs = runs(spans, base, Hsla::default(), Hsla::default());
+    let Ok(lines) =
+        window
+            .text_system()
+            .shape_text(text.into(), px(size), &runs, Some(px(width)), None)
+    else {
+        return Vec::new();
+    };
+    let mut starts: Vec<usize> = lines
+        .iter()
+        .flat_map(|line| {
+            line.wrap_boundaries
+                .iter()
+                .map(|b| line.unwrapped_layout.runs[b.run_ix].glyphs[b.glyph_ix].index)
+        })
+        .filter(|&start| start > 0 && start < len)
+        .collect();
+    starts.sort_unstable();
+    starts.dedup();
+    starts
 }
 
 pub fn layout(slide: &Slide, scale: TypeScale, width: f32, window: &Window) -> CardLayout {

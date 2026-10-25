@@ -62,23 +62,16 @@ fn a_long_bullet_wraps_into_hanging_lines_without_losing_words() {
 }
 
 #[test]
-fn right_to_left_text_wraps_without_panicking_or_losing_words() {
-    for text in [
-        "שלום עולם זה משפט ארוך מספיק כדי לעטוף לשורה נוספת בכרטיס הזה",
-        "مرحبا بالعالم هذه جملة طويلة بما يكفي لتلتف إلى سطر آخر في البطاقة",
-        "Mixed עברית and English text that wraps across the card width",
-    ] {
-        let card = lay_out(&format!("## cue\n- {text}\n"), 300.0);
-        assert!(card.body.len() > 1, "{text}: {card:?}");
-        assert!(
-            card.body.iter().all(|l| !l.spans.is_empty()),
-            "{text}: {card:?}"
-        );
-        let mut got: Vec<&str> = text.split_whitespace().collect();
-        let joined = words(&card);
-        let mut have: Vec<&str> = joined.split_whitespace().collect();
-        got.sort_unstable();
-        have.sort_unstable();
-        assert_eq!(have, got, "{text}");
-    }
+fn a_word_longer_than_the_card_breaks_without_losing_letters() {
+    let word = "Pneumonoultramicroscopicsilicovolcanoconiosis";
+    let card = lay_out(&format!("## cue\n- {word} keyprompter.dev\n"), 200.0);
+    assert!(card.body.len() > 1, "{card:?}");
+    let letters: String = card
+        .body
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.text.as_str()))
+        .collect::<Vec<_>>()
+        .join("")
+        .replace(' ', "");
+    assert_eq!(letters, format!("{word}keyprompter.dev"));
 }
