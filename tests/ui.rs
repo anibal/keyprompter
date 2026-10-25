@@ -267,13 +267,13 @@ async fn undo_never_hands_out_a_discarded_card_id_again(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
-async fn right_clicking_a_card_makes_it_current(cx: &mut TestAppContext) {
+async fn right_clicking_a_card_leaves_the_hot_spot_where_it_is(cx: &mut TestAppContext) {
     let (handle, view) = open(cx, "## a\n## b\n## c\n");
     let mut cx = gpui_kit::VisualTestContext::from_window(handle, cx);
     let next_card = gpui_kit::point(px(942.), px(75.));
     cx.simulate_mouse_down(next_card, gpui_kit::MouseButton::Right, Default::default());
     cx.run_until_parked();
-    assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 1);
+    assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 0);
 }
 
 #[gpui_kit::test]

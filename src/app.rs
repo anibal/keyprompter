@@ -10,7 +10,7 @@ use std::{
 use crate::{
     library::{Entry, Library},
     platform,
-    rundown::{CardId, Edit, Rundown},
+    rundown::{CardId, Edit, Rundown, Side},
     show::Command,
     state::Capture,
     view::{DocumentChanged, StageView},
@@ -72,9 +72,11 @@ impl EditCard {
         }
     }
 
-    pub fn edit(self, card: CardId) -> Edit {
+    /// The edit on `card`, whose copy, when it makes one, goes on the side
+    /// facing the hot spot.
+    pub fn edit(self, card: CardId, hot_spot: Side) -> Edit {
         match self {
-            EditCard::Duplicate => Edit::Duplicate(card),
+            EditCard::Duplicate => Edit::Duplicate(card, hot_spot),
             EditCard::MergeWithNext => Edit::MergeWithNext(card),
             EditCard::MoveBefore => Edit::MoveBefore(card),
             EditCard::MoveAfter => Edit::MoveAfter(card),

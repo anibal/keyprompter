@@ -124,11 +124,18 @@ impl Rundown {
     }
 }
 
+/// Which neighbour of a card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Before,
+    After,
+}
+
 /// A change to one card, named by id so it stays valid across other edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Edit {
-    /// A copy goes right after the card.
-    Duplicate(CardId),
+    /// A copy goes right next to the card, on the given side.
+    Duplicate(CardId, Side),
     /// The next card's cue becomes a bullet and its body follows.
     MergeWithNext(CardId),
     /// Past the first card of a section, a card joins the end of the section before.
@@ -168,14 +175,18 @@ impl Rundown {
     pub fn apply(&mut self, edit: Edit) -> Option<CardId> {
         let ids = self.card_ids();
         let focus = match edit {
-            Edit::Duplicate(id) => {
+            Edit::Duplicate(id, side) => {
                 let (s, c) = self.position(id)?;
                 let copy = Card {
                     id: self.new_id(),
                     ..self.sections[s].cards[c].clone()
                 };
                 let new = copy.id;
-                self.sections[s].cards.insert(c + 1, copy);
+                let at = match side {
+                    Side::Before => c,
+                    Side::After => c + 1,
+                };
+                self.sections[s].cards.insert(at, copy);
                 new
             }
             Edit::MergeWithNext(id) => {

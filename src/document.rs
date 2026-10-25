@@ -1,6 +1,6 @@
 use crate::{
     deck::Deck,
-    rundown::{CardId, Edit, Rundown},
+    rundown::{CardId, Edit, Rundown, Side},
 };
 
 /// One undoable change: what it was called, and the rundown on the other
@@ -55,25 +55,36 @@ impl Document {
         self.redo.last().map(|step| step.label)
     }
 
-    /// Applies `edit` to the card at `index`, remembering it as `label` for
-    /// undo. On a change, returns the index of the card the edit focuses.
+    /// Applies `edit` to the card at `target` while the card at `current` is
+    /// in the hot spot, remembering it as `label` for undo. `edit` learns on
+    /// which side of the card the hot spot is. On a change, returns the index
+    /// to show. That is the hot-spot card wherever it went, unless the edit
+    /// was on it or removed it, in which case it is the card the edit focuses.
     pub fn edit(
         &mut self,
-        index: usize,
+        current: usize,
+        target: usize,
         label: &'static str,
-        edit: impl FnOnce(CardId) -> Edit,
+        edit: impl FnOnce(CardId, Side) -> Edit,
     ) -> Option<usize> {
-        let card = self.card(index)?;
+        let card = self.card(target)?;
+        let hot = self.card(current);
+        let side = if target > current {
+            Side::Before
+        } else {
+            Side::After
+        };
         let mut next = self.rundown.clone();
-        let focus = next.apply(edit(card))?;
+        let focus = next.apply(edit(card, side))?;
         let rundown = std::mem::replace(&mut self.rundown, next);
         self.undo.push(Step {
             label,
             rundown,
-            focus: Some(card),
+            focus: hot,
         });
         self.redo.clear();
-        Some(self.changed(Some(focus), index))
+        let stays = hot.filter(|&h| h != card && self.rundown.card_ids().contains(&h));
+        Some(self.changed(stays.or(Some(focus)), current))
     }
 
     /// Steps back from the strip at `index`. Returns the index of the card

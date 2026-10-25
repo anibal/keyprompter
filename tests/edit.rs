@@ -1,6 +1,6 @@
 use keyprompter::{
     document::Document,
-    rundown::{CardId, Edit, Rundown},
+    rundown::{CardId, Edit, Rundown, Side},
 };
 
 const SHOW: &str = "## Open\nhello\n# A\n## One\n- one\n## Two\n# B\n## Three\nthree\n";
@@ -41,7 +41,7 @@ fn sections(spec: &[(Option<&str>, &[&str])]) -> Vec<(Option<String>, Vec<String
 fn duplicate_puts_a_copy_with_a_new_id_right_after_and_focuses_it() {
     let mut r = Rundown::import(SHOW, "s");
     let one = id(&r, "One");
-    let copy = r.apply(Edit::Duplicate(one)).unwrap();
+    let copy = r.apply(Edit::Duplicate(one, Side::After)).unwrap();
     assert_ne!(copy, one);
     assert_eq!(
         layout(&r),
@@ -124,7 +124,7 @@ fn edits_that_cannot_apply_change_nothing() {
         Edit::MoveBefore(first),
         Edit::MoveAfter(last),
         Edit::MergeWithNext(last),
-        Edit::Duplicate(CardId(999)),
+        Edit::Duplicate(CardId(999), Side::After),
     ] {
         let mut copy = r.clone();
         assert_eq!(copy.apply(edit), None, "{edit:?}");
@@ -141,7 +141,9 @@ fn a_deleted_cards_id_is_never_given_to_a_new_card() {
     let mut r = Rundown::import(SHOW, "s");
     let two = id(&r, "Two");
     r.apply(Edit::Delete(two)).unwrap();
-    let copy = r.apply(Edit::Duplicate(id(&r, "One"))).unwrap();
+    let copy = r
+        .apply(Edit::Duplicate(id(&r, "One"), Side::After))
+        .unwrap();
     assert_ne!(copy, two);
 }
 
@@ -165,7 +167,7 @@ fn a_document_keeps_its_deck_in_step_and_says_which_card_to_show() {
         |d: &Document| -> Vec<String> { d.deck().slides.iter().map(|s| s.cue.clone()).collect() };
     let mut d = Document::new("s".into(), Rundown::import("## a\n## b\n## c\n", "s"));
     assert_eq!(
-        d.edit(2, "Delete Card", Edit::Delete),
+        d.edit(2, 2, "Delete Card", |c, _| Edit::Delete(c)),
         Some(1),
         "deleting the last card shows the one before"
     );
@@ -184,8 +186,66 @@ fn a_document_keeps_its_deck_in_step_and_says_which_card_to_show() {
     assert_eq!(cues(&d), ["a", "b"]);
     assert_eq!(d.redo(1), None, "nothing left to redo");
     assert_eq!(
-        d.edit(9, "Delete Card", Edit::Delete),
+        d.edit(9, 9, "Delete Card", |c, _| Edit::Delete(c)),
         None,
         "no card there"
     );
+}
+
+fn cues_of(d: &Document) -> Vec<String> {
+    d.deck().slides.iter().map(|s| s.cue.clone()).collect()
+}
+
+#[test]
+fn a_copy_goes_on_the_side_facing_the_hot_spot_and_the_hot_spot_stays() {
+    let ids = |d: &Document| d.rundown().card_ids();
+    let dup = |c, side| Edit::Duplicate(c, side);
+    let mut d = Document::new("s".into(), Rundown::import("## a\n## b\n## c\n", "s"));
+    let c = ids(&d)[2];
+    assert_eq!(
+        d.edit(1, 2, "Duplicate Card", dup),
+        Some(1),
+        "b stays in the hot spot"
+    );
+    assert_eq!(cues_of(&d), ["a", "b", "c", "c"]);
+    assert_eq!(
+        ids(&d)[3],
+        c,
+        "the clicked upcoming card moves away, its copy sits nearer"
+    );
+
+    let mut d = Document::new("s".into(), Rundown::import("## a\n## b\n## c\n", "s"));
+    let a = ids(&d)[0];
+    assert_eq!(
+        d.edit(1, 0, "Duplicate Card", dup),
+        Some(2),
+        "b stays in the hot spot"
+    );
+    assert_eq!(
+        ids(&d)[0],
+        a,
+        "the clicked past card moves away, its copy sits nearer"
+    );
+
+    let mut d = Document::new("s".into(), Rundown::import("## a\n## b\n", "s"));
+    let b = ids(&d)[1];
+    assert_eq!(
+        d.edit(1, 1, "Duplicate Card", dup),
+        Some(2),
+        "the copy takes the hot spot"
+    );
+    assert_eq!(ids(&d)[1], b);
+}
+
+#[test]
+fn editing_another_card_leaves_the_hot_spot_unless_it_takes_the_hot_card() {
+    let mut d = Document::new("s".into(), Rundown::import("## a\n## b\n## c\n", "s"));
+    assert_eq!(d.edit(1, 2, "Delete Card", |c, _| Edit::Delete(c)), Some(1));
+    assert_eq!(d.undo(1), Some(1), "undo keeps the hot spot too");
+    assert_eq!(
+        d.edit(1, 0, "Merge with Next Card", |c, _| Edit::MergeWithNext(c)),
+        Some(0),
+        "the hot card was merged away, so the card that took it shows"
+    );
+    assert_eq!(cues_of(&d), ["a", "c"]);
 }

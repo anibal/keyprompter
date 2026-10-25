@@ -78,6 +78,8 @@ pub struct StageView {
     text_step: i32,
     layouts: Vec<CardLayout>,
     motion: Motion<CardLayout>,
+    /// The card a right-click menu is open for.
+    menu_target: Option<usize>,
     /// What `layouts` were laid out for. `None` once the deck has changed.
     layout_key: Option<(TypeScale, f32)>,
     content_h: f32,
@@ -127,6 +129,7 @@ impl StageView {
             text_step: saved.text.clamp(layout::MIN_STEP, layout::MAX_STEP),
             layouts: Vec::new(),
             motion: Motion::default(),
+            menu_target: None,
             layout_key: None,
             content_h: 0.0,
             saved,
@@ -212,8 +215,18 @@ impl StageView {
     }
 
     /// Applies an edit to the current card, saves, and shows the card it focuses.
+    /// Applies a card command to the card in the hot spot.
     pub fn edit(&mut self, op: EditCard, cx: &mut Context<Self>) {
-        self.change(|d, at| d.edit(at, op.title(), |card| op.edit(card)), cx);
+        self.edit_at(self.show.cursor(), op, cx);
+    }
+
+    /// Applies a card command to the card at `target`. The hot spot stays on
+    /// its card unless that card is the one changed.
+    pub fn edit_at(&mut self, target: usize, op: EditCard, cx: &mut Context<Self>) {
+        self.change(
+            |d, at| d.edit(at, target, op.title(), |card, side| op.edit(card, side)),
+            cx,
+        );
     }
 
     pub fn undo(&mut self, cx: &mut Context<Self>) {
@@ -288,8 +301,8 @@ impl StageView {
         cx.emit(DocumentChanged);
     }
 
-    /// Makes the right-clicked card current, then offers the card edits in a
-    /// native menu.
+    /// Offers the card edits for the right-clicked card in a native menu,
+    /// marking that card while the menu is open.
     fn card_menu(
         &mut self,
         index: usize,
@@ -297,10 +310,11 @@ impl StageView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.command(Command::Goto(index), cx);
         let Some(ns_view) = platform::ns_view(window) else {
             return;
         };
+        self.menu_target = Some(index);
+        cx.notify();
         let titles: Vec<_> = CARD_MENU
             .iter()
             .map(|item| item.map(EditCard::title))
@@ -310,9 +324,14 @@ impl StageView {
         cx.spawn_in(window, async move |this, cx| {
             let chosen =
                 platform::context_menu(&ns_view, &titles, (f32::from(at.x), f32::from(at.y)));
-            if let Some(op) = chosen.and_then(|i| CARD_MENU[i]) {
-                this.update(cx, |v, cx| v.edit(op, cx)).ok();
-            }
+            this.update(cx, |v, cx| {
+                v.menu_target = None;
+                match chosen.and_then(|i| CARD_MENU[i]) {
+                    Some(op) => v.edit_at(index, op, cx),
+                    None => cx.notify(),
+                }
+            })
+            .ok();
         })
         .detach();
     }
@@ -409,6 +428,8 @@ struct Appearance {
     shrink: f32,
     /// Body lines from the first number on glow at the second's strength.
     glow: (usize, f32),
+    /// A menu is open for this card, so it is outlined like the current one.
+    marked: bool,
 }
 
 /// A card at its slot, or `None` when it is off the strip or invisible.
@@ -494,7 +515,11 @@ fn card(
             .overflow_hidden()
             .rounded(px(10.0 * size))
             .border_2()
-            .border_color(t.accent.opacity((1.0 - look.d.abs()).max(0.0)))
+            .border_color(t.accent.opacity(if look.marked {
+                1.0
+            } else {
+                (1.0 - look.d.abs()).max(0.0)
+            }))
             .bg(t.card)
             .opacity(opacity)
             .text_color(t.fg)
@@ -577,6 +602,7 @@ impl Render for StageView {
                 opacity: ghost.fade,
                 shrink,
                 glow: (0, 0.0),
+                marked: false,
             };
             card(&geometry, &ghost.card, look, &t, window).map(IntoElement::into_any_element)
         });
@@ -592,6 +618,7 @@ impl Render for StageView {
                     opacity: motion.appear,
                     shrink: 0.8 + 0.2 * motion.appear,
                     glow: (motion.glow_from, motion.glow),
+                    marked: self.menu_target == Some(i),
                 };
                 let element = card(&geometry, layout, look, &t, window)?
                     .id(("slide", i))
