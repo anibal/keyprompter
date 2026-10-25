@@ -1,5 +1,4 @@
 use std::{
-    fs,
     path::PathBuf,
     time::{Duration, Instant, SystemTime},
 };
@@ -7,9 +6,10 @@ use std::{
 use gpui_kit::*;
 
 use crate::{
-    deck::{Span, parse},
+    deck::Span,
     layout::{self, CardLayout, LINE_HEIGHT, Mark, TypeScale},
     platform,
+    rundown::Rundown,
     show::{Command, Show, format_elapsed},
     stage::{ease, slot},
     state::{self, Capture, Frame, State},
@@ -60,8 +60,8 @@ pub struct StageView {
     show: Show,
     pos: f32,
     last_frame: Option<Instant>,
-    source: Option<PathBuf>,
-    mtime: Option<SystemTime>,
+    /// The open rundown and its library id.
+    rundown: Option<(String, Rundown)>,
     error: Option<String>,
     state_path: Option<PathBuf>,
     saved: State,
@@ -79,7 +79,7 @@ pub struct StageView {
 
 impl StageView {
     pub fn new(
-        source: Option<PathBuf>,
+        rundown: Option<(String, Rundown)>,
         saved: State,
         state_path: Option<PathBuf>,
         window: &mut Window,
@@ -105,13 +105,12 @@ impl StageView {
                 }
             }
         });
-        let mut view = Self {
+        let view = Self {
             focus,
-            show: Show::new(Default::default()),
+            show: Show::new(rundown.as_ref().map(|(_, r)| r.deck()).unwrap_or_default()),
             pos: 0.0,
             last_frame: None,
-            source,
-            mtime: None,
+            rundown,
             error: None,
             capture: saved.capture,
             text_step: saved.text.clamp(layout::MIN_STEP, layout::MAX_STEP),
@@ -125,7 +124,6 @@ impl StageView {
             _subscriptions: subscriptions,
             _tick: tick,
         };
-        view.reload_if_changed();
         // macOS pulls a window under the menu bar when it first shows it, so
         // the saved frame goes back on once it is on screen.
         cx.on_next_frame(window, |this, window, cx| {
@@ -185,19 +183,26 @@ impl StageView {
         self.persist(window);
     }
 
+    pub fn rundown(&self) -> Option<&(String, Rundown)> {
+        self.rundown.as_ref()
+    }
+
     /// Switches to another rundown, starting it from the first slide.
-    pub fn open(&mut self, source: PathBuf, window: &Window, cx: &mut Context<Self>) {
-        self.source = Some(source);
-        self.mtime = None;
-        self.show = Show::new(Default::default());
+    pub fn open(&mut self, id: String, rundown: Rundown, window: &Window, cx: &mut Context<Self>) {
+        self.show = Show::new(rundown.deck());
+        self.rundown = Some((id, rundown));
         self.generation += 1;
-        self.reload_if_changed();
+        self.error = None;
         self.persist(window);
         cx.notify();
     }
 
+    pub fn show_error(&mut self, error: String, cx: &mut Context<Self>) {
+        self.error = Some(error);
+        cx.notify();
+    }
+
     fn tick(&mut self, window: &Window, cx: &mut Context<Self>) {
-        self.reload_if_changed();
         self.persist(window);
         cx.notify();
     }
@@ -223,31 +228,6 @@ impl StageView {
         }));
     }
 
-    fn reload_if_changed(&mut self) {
-        let Some(source) = &self.source else {
-            return;
-        };
-        let loaded = fs::metadata(source)
-            .and_then(|m| m.modified())
-            .and_then(|modified| {
-                if Some(modified) == self.mtime {
-                    return Ok(None);
-                }
-                Ok(Some((modified, fs::read_to_string(source)?)))
-            });
-        match loaded {
-            Ok(None) => {}
-            Ok(Some((modified, text))) => {
-                self.mtime = Some(modified);
-                self.error = None;
-                self.generation += 1;
-                self.show
-                    .apply(Command::Reload(parse(&text)), Instant::now());
-            }
-            Err(e) => self.error = Some(format!("Can't read file: {e}")),
-        }
-    }
-
     fn persist(&mut self, window: &Window) {
         let b = window.bounds();
         let frame = platform::frame(window).unwrap_or(Frame {
@@ -258,7 +238,7 @@ impl StageView {
         });
         let current = State {
             frame: Some(frame),
-            deck: self.source.clone(),
+            rundown: self.rundown.as_ref().map(|(id, _)| id.clone()),
             capture: self.capture,
             text: self.text_step,
         };
@@ -426,11 +406,10 @@ impl Render for StageView {
             })
             .collect();
 
-        let file_name = self
-            .source
-            .as_deref()
-            .and_then(|s| s.file_name())
-            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        let title = self
+            .rundown
+            .as_ref()
+            .map_or_else(String::new, |(_, r)| r.title.clone());
         let section = self
             .show
             .current()
@@ -476,7 +455,7 @@ impl Render for StageView {
                     .text_size(px(11.0))
                     .text_color(t.dim)
                     .truncate()
-                    .child(file_name),
+                    .child(title),
             )
             .children(overflow_note.map(|note| {
                 div()
@@ -494,10 +473,10 @@ impl Render for StageView {
             }));
 
         let empty = self.show.slides().is_empty().then(|| {
-            let hint = if self.source.is_some() {
-                "No slides yet. Add `## cue` headings to the file."
+            let hint = if self.rundown.is_some() {
+                "This rundown has no cards."
             } else {
-                "Open a rundown with ⌘O."
+                "Import a Markdown rundown with File > Import Markdown… (⌘O)."
             };
             div()
                 .size_full()

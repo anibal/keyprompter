@@ -30,7 +30,8 @@ impl Frame {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct State {
     pub frame: Option<Frame>,
-    pub deck: Option<PathBuf>,
+    /// Library id of the open rundown.
+    pub rundown: Option<String>,
     pub capture: Capture,
     /// Text-size steps away from the size the strip height gives.
     pub text: i32,
@@ -50,7 +51,7 @@ impl State {
         for (key, value) in text.lines().filter_map(|l| l.split_once(' ')) {
             match key {
                 "frame" => state.frame = Frame::parse(value),
-                "deck" if !value.is_empty() => state.deck = Some(PathBuf::from(value)),
+                "rundown" if !value.is_empty() => state.rundown = Some(value.to_string()),
                 "capture" if value == "shown" => state.capture = Capture::Shown,
                 "text" => state.text = value.parse().unwrap_or(0),
                 _ => {}
@@ -64,8 +65,8 @@ impl State {
         if let Some(frame) = self.frame {
             out += &format!("frame {}\n", frame.format());
         }
-        if let Some(deck) = &self.deck {
-            out += &format!("deck {}\n", deck.display());
+        if let Some(id) = &self.rundown {
+            out += &format!("rundown {id}\n");
         }
         if self.capture == Capture::Shown {
             out += "capture shown\n";

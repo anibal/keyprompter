@@ -4,6 +4,7 @@ use futures::{StreamExt, channel::mpsc};
 use gpui_kit::*;
 use keyprompter::{
     app, hotkeys,
+    library::Library,
     state::{self, Frame},
     view::StageView,
 };
@@ -13,12 +14,19 @@ const DEFAULT_H: f32 = 150.0;
 fn main() {
     let state_path = state::path();
     let saved = state_path.as_deref().map(state::load).unwrap_or_default();
-    let deck = std::env::args_os()
+    let library = Library::new(Library::default_dir().expect("Application Support folder"));
+    let argument = std::env::args_os()
         .nth(1)
-        .map(|arg| std::path::absolute(&arg).unwrap_or_else(|_| PathBuf::from(arg)))
-        .or(saved.deck.clone());
+        .map(|arg| std::path::absolute(&arg).unwrap_or_else(|_| PathBuf::from(arg)));
+    let restored = match (&argument, &saved.rundown) {
+        (None, Some(id)) => library.load(id).ok().map(|r| (id.clone(), r)),
+        _ => None,
+    };
 
     let (opened_tx, mut opened_rx) = mpsc::unbounded();
+    if let Some(path) = argument {
+        opened_tx.unbounded_send(path).ok();
+    }
     let application = application();
     application.on_open_urls(move |urls| {
         for path in urls
@@ -53,15 +61,15 @@ fn main() {
                 ..WindowOptions::default()
             },
             cx,
-            |window, cx| cx.new(|cx| StageView::new(deck, saved, state_path, window, cx)),
+            |window, cx| cx.new(|cx| StageView::new(restored, saved, state_path, window, cx)),
         )
         .expect("open window");
 
-        app::connect(window, view.clone(), cx);
+        app::connect(window, view.clone(), library.clone(), cx);
         hotkeys::listen(view.clone(), cx);
         cx.spawn(async move |cx| {
             while let Some(path) = opened_rx.next().await {
-                cx.update(|cx| app::open(window, &view, path, cx));
+                cx.update(|cx| app::open_markdown(window, &view, &library, &path, cx));
             }
         })
         .detach();

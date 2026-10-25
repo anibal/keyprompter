@@ -6,26 +6,25 @@ use gpui_kit::{
     size,
 };
 use keyprompter::{
+    app::open_markdown,
+    library::Library,
+    rundown::Rundown,
     state::{Capture, State},
     view::StageView,
 };
 
-fn open(cx: &mut TestAppContext, deck: &str) -> (AnyWindowHandle, Entity<StageView>) {
+fn library() -> Library {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("kp-ui-{}-{n}.md", std::process::id()));
-    std::fs::write(&path, deck).unwrap();
-    open_path(cx, path)
+    Library::new(std::env::temp_dir().join(format!("kp-ui-{}-{n}", std::process::id())))
 }
 
-fn open_path(
-    cx: &mut TestAppContext,
-    path: std::path::PathBuf,
-) -> (AnyWindowHandle, Entity<StageView>) {
+fn open(cx: &mut TestAppContext, deck: &str) -> (AnyWindowHandle, Entity<StageView>) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         keyprompter::app::init(cx);
     });
+    let rundown = Some(("test".to_string(), Rundown::import(deck, "test")));
     let opened = cx.update(|cx| {
         gpui_kit::open_window(
             WindowOptions {
@@ -37,13 +36,11 @@ fn open_path(
                 ..WindowOptions::default()
             },
             cx,
-            |window, cx| {
-                cx.new(|cx| StageView::new(Some(path), State::default(), None, window, cx))
-            },
+            |window, cx| cx.new(|cx| StageView::new(rundown, State::default(), None, window, cx)),
         )
         .unwrap()
     });
-    cx.update(|cx| keyprompter::app::connect(opened.0, opened.1.clone(), cx));
+    cx.update(|cx| keyprompter::app::connect(opened.0, opened.1.clone(), library(), cx));
     cx.run_until_parked();
     opened
 }
@@ -83,11 +80,23 @@ async fn unbound_keys_do_nothing(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-async fn missing_deck_file_surfaces_an_error_and_an_empty_show(cx: &mut TestAppContext) {
-    let (handle, view) = open_path(cx, "/nonexistent/kp/deck.md".into());
-    press(cx, handle, "right");
-    assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 0);
+async fn a_missing_markdown_file_shows_an_error_and_keeps_the_current_rundown(
+    cx: &mut TestAppContext,
+) {
+    let (handle, view) = open(cx, "## a\n## b\n");
+    cx.update(|cx| {
+        open_markdown(
+            handle,
+            &view,
+            &library(),
+            "/nonexistent/kp/deck.md".as_ref(),
+            cx,
+        )
+    });
+    cx.run_until_parked();
     assert!(cx.read_entity(&view, |v, _| v.error().is_some()));
+    press(cx, handle, "end");
+    assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 1);
 }
 
 #[gpui_kit::test]
@@ -96,7 +105,7 @@ async fn opening_another_deck_starts_it_from_the_top(cx: &mut TestAppContext) {
     press(cx, handle, "right");
     let other = std::env::temp_dir().join(format!("kp-ui-{}-other.md", std::process::id()));
     std::fs::write(&other, "## x\n## y\n## z\n").unwrap();
-    cx.update(|cx| keyprompter::app::open(handle, &view, other, cx));
+    cx.update(|cx| open_markdown(handle, &view, &library(), &other, cx));
     cx.run_until_parked();
     assert_eq!(cx.read_entity(&view, |v, _| v.cursor()), 0);
     press(cx, handle, "end");

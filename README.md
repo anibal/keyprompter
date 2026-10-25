@@ -1,6 +1,6 @@
 # KeyPrompter
 
-A cue strip for streaming. It shows "mini slides" from a Markdown file at the top of the screen, near the webcam. The current slide sits at the horizontal middle. Upcoming slides wait on the right, and past slides shrink into a trail on the left.
+A cue strip for streaming. It shows "mini slides" at the top of the screen, near the webcam. The current slide sits at the horizontal middle. Upcoming slides wait on the right, and past slides shrink into a trail on the left.
 
 ## Run
 
@@ -8,7 +8,7 @@ A cue strip for streaming. It shows "mini slides" from a Markdown file at the to
 cargo run --release --offline -- path/to/rundown.md
 ```
 
-Without an argument it reopens the last rundown. Use File > Open (⌘O) to pick another one. Click the strip once to give it keyboard focus. Drag it to move it. Let go near a screen edge or the menu bar and it snaps flush. View > Move to Top of Screen puts it over the menu bar, closest to the webcam, and View > Move to Display sends it to the top of another screen. If its saved screen is gone at launch, it opens at the top of the main screen. The position and the open rundown are saved in `~/Library/Application Support/KeyPrompter/state.txt`.
+KeyPrompter keeps its rundowns in a library at `~/Library/Application Support/KeyPrompter/Rundowns/`. A Markdown file passed on the command line, opened from Finder, or picked with File > Import Markdown (⌘O) is imported into the library the first time. Opening the same file again reopens the library copy, so later changes to the Markdown file are not picked up. File > Open Recent switches between rundowns, and File > Export Markdown writes the current one back out. Without an argument it reopens the last rundown. Click the strip once to give it keyboard focus. Drag it to move it. Let go near a screen edge or the menu bar and it snaps flush. View > Move to Top of Screen puts it over the menu bar, closest to the webcam, and View > Move to Display sends it to the top of another screen. If its saved screen is gone at launch, it opens at the top of the main screen. The position, the open rundown and the view settings are saved in `~/Library/Application Support/KeyPrompter/state.txt`.
 
 | Key | Action |
 |---|---|
@@ -18,7 +18,7 @@ Without an argument it reopens the last rundown. Use File > Open (⌘O) to pick 
 | End | Last slide |
 | ⌃⌥→ / ⌃⌥← | Next / previous slide from any app, no focus needed |
 | ⌥⌘↑ | Move the strip to the very top of its screen, over the menu bar |
-| ⌘O | Open a rundown |
+| ⌘O | Import a Markdown rundown |
 | ⌘H | Hide |
 | ⌘Q | Quit |
 
@@ -44,7 +44,7 @@ The strip is hidden from screenshots, screen sharing and recordings by default. 
 A paragraph line.
 ```
 
-Text before the first heading is ignored. Saving the file reloads it within a second and keeps your place.
+Text before the first heading is ignored. Import reads this format and Export writes it.
 
 ## Check
 

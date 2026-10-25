@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use keyprompter::state::{Capture, Frame, State, load, save};
 
 #[test]
@@ -13,7 +11,7 @@ fn state_round_trips_through_the_file() {
             w: 1440.0,
             h: 150.0,
         }),
-        deck: Some(PathBuf::from("/Users/me/My Shows/rundown.md")),
+        rundown: Some("1729800000000".into()),
         capture: Capture::Shown,
         text: -2,
     };
@@ -35,9 +33,9 @@ fn the_strip_starts_hidden_from_capture() {
 
 #[test]
 fn a_bad_line_costs_only_its_own_setting() {
-    let state = State::parse("frame 0 0 NaN 150\nzoom 2\ndeck /tmp/a.md\n");
+    let state = State::parse("frame 0 0 NaN 150\nzoom 2\nrundown 42\n");
     assert_eq!(state.frame, None);
-    assert_eq!(state.deck, Some(PathBuf::from("/tmp/a.md")));
+    assert_eq!(state.rundown.as_deref(), Some("42"));
 }
 
 #[test]

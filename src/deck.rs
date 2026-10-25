@@ -1,3 +1,5 @@
+use crate::rundown::Rundown;
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Deck {
     pub slides: Vec<Slide>,
@@ -32,68 +34,44 @@ pub enum SpanStyle {
 
 /// Total: any text yields a deck. Lines before the first `##` belong to no slide.
 pub fn parse(markdown: &str) -> Deck {
-    let mut deck = Deck::default();
-    let mut section = None;
-    let mut open: Option<Slide> = None;
-    let mut para = String::new();
-
-    fn flush_para(open: &mut Option<Slide>, para: &mut String) {
-        if let Some(slide) = open
-            && !para.is_empty()
-        {
-            slide.body.push(Block::Para(spans(para)));
-        }
-        para.clear();
-    }
-
-    for line in markdown.lines() {
-        let line = line.trim();
-        if let Some((level, text)) = heading(line) {
-            flush_para(&mut open, &mut para);
-            match level {
-                1 | 2 => {
-                    deck.slides.extend(open.take());
-                    if level == 1 {
-                        section = Some(text.to_string());
-                    } else {
-                        open = Some(Slide {
-                            section: section.clone(),
-                            cue: text.to_string(),
-                            body: Vec::new(),
-                        });
-                    }
-                }
-                _ => {
-                    if let Some(slide) = &mut open {
-                        slide.body.push(Block::Para(vec![Span {
-                            text: text.to_string(),
-                            style: SpanStyle::Bold,
-                        }]));
-                    }
-                }
-            }
-        } else if line.is_empty() {
-            flush_para(&mut open, &mut para);
-        } else if open.is_some() {
-            if let Some(item) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
-                flush_para(&mut open, &mut para);
-                if let Some(slide) = &mut open {
-                    slide.body.push(Block::Bullet(spans(item.trim())));
-                }
-            } else {
-                if !para.is_empty() {
-                    para.push(' ');
-                }
-                para.push_str(line);
-            }
-        }
-    }
-    flush_para(&mut open, &mut para);
-    deck.slides.extend(open);
-    deck
+    Rundown::import(markdown, "").deck()
 }
 
-fn heading(line: &str) -> Option<(usize, &str)> {
+/// The body of one card: bullets, paragraphs, and deeper headings as bold lines.
+pub fn parse_body(text: &str) -> Vec<Block> {
+    let mut body = Vec::new();
+    let mut para = String::new();
+    let flush = |body: &mut Vec<Block>, para: &mut String| {
+        if !para.is_empty() {
+            body.push(Block::Para(spans(para)));
+            para.clear();
+        }
+    };
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some((_, text)) = heading(line) {
+            flush(&mut body, &mut para);
+            body.push(Block::Para(vec![Span {
+                text: text.to_string(),
+                style: SpanStyle::Bold,
+            }]));
+        } else if line.is_empty() {
+            flush(&mut body, &mut para);
+        } else if let Some(item) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
+            flush(&mut body, &mut para);
+            body.push(Block::Bullet(spans(item.trim())));
+        } else {
+            if !para.is_empty() {
+                para.push(' ');
+            }
+            para.push_str(line);
+        }
+    }
+    flush(&mut body, &mut para);
+    body
+}
+
+pub(crate) fn heading(line: &str) -> Option<(usize, &str)> {
     let text = line.trim_start_matches('#');
     let level = line.len() - text.len();
     if level == 0 || !(text.is_empty() || text.starts_with(' ')) {

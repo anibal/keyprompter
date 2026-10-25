@@ -1,8 +1,18 @@
 use gpui_kit::*;
 
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
-use crate::{platform, show::Command, state::Capture, view::StageView};
+use crate::{
+    library::{Entry, Library},
+    platform,
+    rundown::Rundown,
+    show::Command,
+    state::Capture,
+    view::StageView,
+};
 
 actions!(
     keyprompter,
@@ -11,7 +21,8 @@ actions!(
         Prev,
         First,
         Last,
-        Open,
+        Import,
+        Export,
         ToggleCapture,
         MoveToTop,
         BiggerText,
@@ -23,6 +34,13 @@ actions!(
         ShowAll
     ]
 );
+
+/// Opens the `index`-th rundown of the library list, most recent first.
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = keyprompter, no_json)]
+pub struct OpenRecent {
+    pub index: usize,
+}
 
 /// Moves the strip to the top of the `index`-th screen, as `NSScreen` lists them.
 #[derive(Clone, PartialEq, Action)]
@@ -44,7 +62,7 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("backspace", Prev, None),
         KeyBinding::new("home", First, None),
         KeyBinding::new("end", Last, None),
-        KeyBinding::new("cmd-o", Open, None),
+        KeyBinding::new("cmd-o", Import, None),
         KeyBinding::new("alt-cmd-up", MoveToTop, None),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-h", Hide, None),
@@ -52,7 +70,7 @@ pub fn key_bindings() -> Vec<KeyBinding> {
     ]
 }
 
-pub fn menus(capture: Capture, screens: &[String]) -> Vec<Menu> {
+pub fn menus(capture: Capture, screens: &[String], recent: &[Entry]) -> Vec<Menu> {
     vec![
         Menu {
             name: "KeyPrompter".into(),
@@ -67,7 +85,22 @@ pub fn menus(capture: Capture, screens: &[String]) -> Vec<Menu> {
         },
         Menu {
             name: "File".into(),
-            items: vec![MenuItem::action("Open…", Open)],
+            items: vec![
+                MenuItem::action("Import Markdown…", Import),
+                MenuItem::submenu(Menu {
+                    name: "Open Recent".into(),
+                    items: recent
+                        .iter()
+                        .enumerate()
+                        .map(|(index, entry)| {
+                            MenuItem::action(entry.title.clone(), OpenRecent { index })
+                        })
+                        .collect(),
+                    disabled: recent.is_empty(),
+                }),
+                MenuItem::separator(),
+                MenuItem::action("Export Markdown…", Export),
+            ],
             disabled: false,
         },
         Menu {
@@ -116,13 +149,13 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
-    cx.set_menus(menus(Capture::default(), &[]));
+    cx.set_menus(menus(Capture::default(), &[], &[]));
 }
 
 /// Routes the strip's actions to its view. They must be global listeners:
 /// menu items reach only those, because GPUI's active-window lookup skips
 /// panels and the strip is a panel.
-pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, cx: &mut App) {
+pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, library: Library, cx: &mut App) {
     fn route<A: Action>(view: &Entity<StageView>, cmd: Command, cx: &mut App) {
         let view = view.clone();
         cx.on_action(move |_: &A, cx| view.update(cx, |v, cx| v.command(cmd.clone(), cx)));
@@ -133,14 +166,14 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, cx: &mut App) {
     route::<Last>(&view, Command::Last, cx);
 
     cx.on_action({
-        let view = view.clone();
+        let (view, library) = (view.clone(), library.clone());
         move |_: &ToggleCapture, cx| {
             window
                 .update(cx, |_, window, cx| {
                     view.update(cx, |v, _| v.toggle_capture(window))
                 })
                 .ok();
-            refresh_menus(&view, cx);
+            refresh_menus(&view, &library, cx);
         }
     });
     // GPUI drops the move notification while the window is borrowed here, so
@@ -183,26 +216,68 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, cx: &mut App) {
     });
     cx.on_action(move |action: &MoveToDisplay, cx| move_to_top(Some(action.index), cx));
     cx.on_action({
-        let view = view.clone();
-        move |_: &Open, cx| {
+        let (view, library) = (view.clone(), library.clone());
+        move |_: &Import, cx| {
             let picked = cx.prompt_for_paths(PathPromptOptions {
                 files: true,
                 directories: false,
                 multiple: false,
-                prompt: Some("Open Rundown".into()),
+                prompt: Some("Import".into()),
             });
-            let view = view.clone();
+            let (view, library) = (view.clone(), library.clone());
             cx.spawn(async move |cx| {
                 if let Ok(Ok(Some(paths))) = picked.await
                     && let Some(path) = paths.into_iter().next()
                 {
-                    cx.update(|cx| open(window, &view, path, cx));
+                    cx.update(|cx| open_markdown(window, &view, &library, &path, cx));
                 }
             })
             .detach();
         }
     });
-    refresh_menus(&view, cx);
+    cx.on_action({
+        let view = view.clone();
+        move |_: &Export, cx| {
+            let Some((_, rundown)) = view.read(cx).rundown().cloned() else {
+                return;
+            };
+            let dir = rundown
+                .imported_from
+                .as_deref()
+                .and_then(|p| p.parent())
+                .map(PathBuf::from)
+                .or_else(dirs::home_dir)
+                .unwrap_or_default();
+            let picked = cx.prompt_for_new_path(&dir, Some(&format!("{}.md", rundown.title)));
+            let view = view.clone();
+            cx.spawn(async move |cx| {
+                if let Ok(Ok(Some(path))) = picked.await
+                    && let Err(e) = std::fs::write(&path, rundown.export())
+                {
+                    cx.update(|cx| {
+                        view.update(cx, |v, cx| v.show_error(format!("Can't export: {e}"), cx))
+                    });
+                }
+            })
+            .detach();
+        }
+    });
+    cx.on_action({
+        let (view, library) = (view.clone(), library.clone());
+        move |action: &OpenRecent, cx| {
+            let Some(entry) = library.list().into_iter().nth(action.index) else {
+                return;
+            };
+            match library.load(&entry.id) {
+                Ok(rundown) => open(window, &view, entry.id, rundown, cx),
+                Err(e) => view.update(cx, |v, cx| {
+                    v.show_error(format!("Can't open {}: {e}", entry.title), cx)
+                }),
+            }
+            refresh_menus(&view, &library, cx);
+        }
+    });
+    refresh_menus(&view, &library, cx);
     cx.spawn(async move |cx| {
         let mut shown = platform::screen_names();
         loop {
@@ -210,22 +285,50 @@ pub fn connect(window: AnyWindowHandle, view: Entity<StageView>, cx: &mut App) {
             let now = platform::screen_names();
             if now != shown {
                 shown = now;
-                cx.update(|cx| refresh_menus(&view, cx));
+                cx.update(|cx| refresh_menus(&view, &library, cx));
             }
         }
     })
     .detach();
 }
 
-/// Rebuilds the menu bar from the capture setting and the connected screens.
-fn refresh_menus(view: &Entity<StageView>, cx: &mut App) {
-    cx.set_menus(menus(view.read(cx).capture(), &platform::screen_names()));
+/// Rebuilds the menu bar from the capture setting, the connected screens
+/// and the library.
+fn refresh_menus(view: &Entity<StageView>, library: &Library, cx: &mut App) {
+    cx.set_menus(menus(
+        view.read(cx).capture(),
+        &platform::screen_names(),
+        &library.list(),
+    ));
 }
 
-pub fn open(window: AnyWindowHandle, view: &Entity<StageView>, path: PathBuf, cx: &mut App) {
+pub fn open(
+    window: AnyWindowHandle,
+    view: &Entity<StageView>,
+    id: String,
+    rundown: Rundown,
+    cx: &mut App,
+) {
     window
         .update(cx, |_, window, cx| {
-            view.update(cx, |v, cx| v.open(path, window, cx))
+            view.update(cx, |v, cx| v.open(id, rundown, window, cx))
         })
         .ok();
+}
+
+/// Opens a Markdown file through the library, importing it the first time.
+pub fn open_markdown(
+    window: AnyWindowHandle,
+    view: &Entity<StageView>,
+    library: &Library,
+    path: &Path,
+    cx: &mut App,
+) {
+    match library.open_markdown(path) {
+        Ok((id, rundown)) => open(window, view, id, rundown, cx),
+        Err(e) => view.update(cx, |v, cx| {
+            v.show_error(format!("Can't import {}: {e}", path.display()), cx)
+        }),
+    }
+    refresh_menus(view, library, cx);
 }
