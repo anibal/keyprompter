@@ -30,7 +30,7 @@ use crate::{
 const COLUMN_W: f32 = 200.0;
 const CARD_VPAD: f32 = 12.0;
 const CARD_PAD: f32 = 10.0;
-const HEADER_GAP: f32 = 4.0;
+const RAIL_GAP: f32 = 18.0;
 const HEADER_LABEL_H: f32 = 14.0;
 const HEADER_LABEL_MIN_W: f32 = 48.0;
 
@@ -887,7 +887,7 @@ fn section_header(
     if line.1 < 0.0 || line.0 > g.stage_w {
         return Vec::new();
     }
-    let y = g.stage.place(1.0, 1.0).top - HEADER_GAP;
+    let y = g.stage.hang_top() - RAIL_GAP;
     let middle = g.stage.place(cursor as f32 - pos, 1.0);
     let label = label_span(
         line,

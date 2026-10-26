@@ -55,6 +55,17 @@ pub struct Placement {
 }
 
 impl Stage {
+    /// Top of the card in the hot spot.
+    pub fn mid_top(&self) -> f32 {
+        (self.win_h - self.card_h) / 2.0
+    }
+
+    /// The top every side card hangs from: low enough that an upcoming
+    /// card's bottom meets the middle card's.
+    pub fn hang_top(&self) -> f32 {
+        self.mid_top() + self.card_h * (1.0 - slot(1.0).scale)
+    }
+
     /// The card at distance `d` from the hot spot, scaled further by `shrink`.
     pub fn place(&self, d: f32, shrink: f32) -> Placement {
         let s = slot(d);
@@ -62,7 +73,7 @@ impl Stage {
         let (w, h) = (self.card_w * size, self.card_h * size);
         Placement {
             left: self.hot_x + s.x * self.card_w - w / 2.0,
-            top: (self.win_h - h) / 2.0,
+            top: lerp(self.mid_top(), self.hang_top(), d.abs()),
             w,
             h,
             size,

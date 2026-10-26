@@ -89,10 +89,35 @@ fn a_next_card_sits_right_of_the_middle_one_and_smaller() {
 }
 
 #[test]
-fn cards_are_centered_vertically() {
-    for d in [-2.0, 0.0, 1.5] {
-        let p = STAGE.place(d, 0.9);
-        assert!((p.top + p.h / 2.0 - 75.0).abs() < 1e-4);
+fn side_cards_on_both_sides_hang_from_one_top() {
+    let hang = STAGE.place(1.0, 1.0).top;
+    assert_eq!(hang, STAGE.hang_top());
+    for d in [-3.0, -1.0, 1.0, 2.5] {
+        assert_eq!(STAGE.place(d, 1.0).top, hang);
+    }
+    assert!((hang - (10.0 + 130.0 * 0.2)).abs() < 1e-4);
+}
+
+#[test]
+fn an_upcoming_card_ends_where_the_middle_card_ends() {
+    let (mid, next) = (STAGE.place(0.0, 1.0), STAGE.place(1.0, 1.0));
+    assert!((next.top + next.h - (mid.top + mid.h)).abs() < 1e-4);
+}
+
+#[test]
+fn shrinking_cards_keep_their_top() {
+    assert_eq!(STAGE.place(1.0, 0.5).top, STAGE.place(1.0, 1.0).top);
+}
+
+#[test]
+fn top_is_continuous_across_d() {
+    let mut d = -4.0_f32;
+    let mut prev = STAGE.place(d, 1.0).top;
+    while d < 4.0 {
+        d += 0.01;
+        let top = STAGE.place(d, 1.0).top;
+        assert!((top - prev).abs() < 0.5, "top jumps at d={d}");
+        prev = top;
     }
 }
 
