@@ -58,7 +58,7 @@ cargo fmt --check && cargo clippy --offline --all-targets -- -D warnings && carg
 osascript -l JavaScript scripts/windows.js keyprompter   # on-screen windows, no Screen Recording permission needed
 ```
 
-To try the bundled app without touching your own settings or library, `scripts/try.sh` runs a second copy with `KEYPROMPTER_HOME` set to `target/try-home`, which it wipes on each start. That copy also takes the actions the menus run from a `drive` pipe in that folder, one per line, with any data as JSON after the name.
+To try the bundled app without touching your own settings or library, build it with `scripts/bundle.sh`, then `scripts/try.sh` runs a second copy with `KEYPROMPTER_HOME` set to `target/try-home`, which it wipes on each start. That copy also takes the actions the menus run from a `drive` pipe in that folder, one per line, with any data as JSON after the name.
 
 ```sh
 scripts/try.sh start examples/stream.md
