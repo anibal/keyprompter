@@ -132,45 +132,86 @@ fn shrink_scales_a_card_around_its_center() {
 const VISIBLE: (f32, f32) = (0.0, 800.0);
 
 #[test]
-fn a_label_starts_at_the_line_when_nothing_covers_it() {
+fn a_label_starts_at_the_first_pieces_left() {
     assert_eq!(
-        label_span((100.0, 700.0), (300.0, 500.0), VISIBLE, 40.0),
+        label_span(&[(100.0, 300.0), (500.0, 700.0)], VISIBLE, 40.0),
         Some((100.0, 300.0))
     );
 }
 
 #[test]
-fn a_label_is_pinned_to_the_stage_edge_when_the_line_starts_off_screen() {
+fn a_label_is_pinned_to_the_stage_edge_when_the_piece_starts_off_screen() {
     assert_eq!(
-        label_span((-400.0, 250.0), (300.0, 500.0), VISIBLE, 40.0),
+        label_span(&[(-400.0, 250.0), (500.0, 700.0)], VISIBLE, 40.0),
         Some((0.0, 250.0))
     );
 }
 
 #[test]
-fn a_label_moves_right_of_the_middle_card_when_the_line_starts_under_it() {
+fn a_label_skips_a_narrow_left_piece_for_the_right_one() {
     assert_eq!(
-        label_span((350.0, 700.0), (300.0, 500.0), VISIBLE, 40.0),
+        label_span(&[(-400.0, 30.0), (500.0, 700.0)], VISIBLE, 40.0),
         Some((500.0, 700.0))
     );
     assert_eq!(
-        label_span((-200.0, 700.0), (0.0, 500.0), VISIBLE, 40.0),
+        label_span(&[(100.0, 120.0), (500.0, 700.0)], VISIBLE, 40.0),
         Some((500.0, 700.0))
     );
 }
 
 #[test]
-fn a_label_is_dropped_when_only_a_sliver_is_left() {
+fn a_label_is_dropped_when_nothing_is_wide_enough() {
     assert_eq!(
-        label_span((-400.0, 30.0), (300.0, 500.0), VISIBLE, 40.0),
+        label_span(&[(-400.0, 30.0), (770.0, 900.0)], VISIBLE, 40.0),
         None
     );
+    assert_eq!(label_span(&[], VISIBLE, 40.0), None);
+}
+
+fn right_edge(d: f32) -> f32 {
+    let p = STAGE.place(d, 1.0);
+    p.left + p.w
+}
+
+#[test]
+fn a_run_around_the_middle_has_a_piece_each_side_between_side_card_edges() {
+    let pieces = STAGE.header_pieces(-2.0, 2.0);
+    assert_eq!(pieces.len(), 2);
+    assert_eq!(pieces[0], (STAGE.place(-2.0, 1.0).left, right_edge(-1.0)));
+    assert_eq!(pieces[1], (STAGE.place(1.0, 1.0).left, right_edge(2.0)));
+}
+
+#[test]
+fn a_run_of_only_the_middle_card_has_no_pieces() {
+    assert!(STAGE.header_pieces(0.0, 0.0).is_empty());
+}
+
+#[test]
+fn a_run_on_one_side_has_one_piece_across_its_cards() {
     assert_eq!(
-        label_span((350.0, 520.0), (300.0, 500.0), VISIBLE, 40.0),
-        None
+        STAGE.header_pieces(1.0, 3.0),
+        vec![(STAGE.place(1.0, 1.0).left, right_edge(3.0))]
     );
-    assert_eq!(
-        label_span((-400.0, -10.0), (300.0, 500.0), VISIBLE, 40.0),
-        None
-    );
+}
+
+#[test]
+fn pieces_vary_continuously_as_the_strip_slides() {
+    let mut pos = 0.0_f32;
+    let mut prev = STAGE.header_pieces(-2.0 - pos, 2.0 - pos);
+    while pos < 3.0 {
+        pos += 0.01;
+        let now = STAGE.header_pieces(-2.0 - pos, 2.0 - pos);
+        if now.len() == prev.len() {
+            for (a, b) in now.iter().zip(&prev) {
+                assert!(
+                    (a.0 - b.0).abs() < 20.0 && (a.1 - b.1).abs() < 20.0,
+                    "jump at pos={pos}"
+                );
+            }
+        } else {
+            let widths: Vec<_> = now.iter().chain(&prev).map(|(a, b)| b - a).collect();
+            assert!(widths.iter().any(|w| *w < 20.0), "piece pops at pos={pos}");
+        }
+        prev = now;
+    }
 }

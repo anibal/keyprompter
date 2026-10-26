@@ -878,36 +878,17 @@ fn section_header(
     g: &Geometry,
     (key, span): (&RunKey, (f32, f32)),
     pos: f32,
-    cursor: usize,
     t: &Theme,
 ) -> Vec<AnyElement> {
-    let first = g.stage.place(span.0 - pos, 1.0);
-    let last = g.stage.place(span.1 - pos, 1.0);
-    let line = (first.left, last.left + last.w);
-    if line.1 < 0.0 || line.0 > g.stage_w {
-        return Vec::new();
-    }
+    let pieces: Vec<_> = g
+        .stage
+        .header_pieces(span.0 - pos, span.1 - pos)
+        .into_iter()
+        .filter(|&(a, b)| b >= 0.0 && a <= g.stage_w)
+        .collect();
     let y = g.stage.hang_top() - RAIL_GAP;
-    let middle = g.stage.place(cursor as f32 - pos, 1.0);
-    let label = label_span(
-        line,
-        (middle.left, middle.left + middle.w),
-        (0.0, g.stage_w),
-        HEADER_LABEL_MIN_W,
-    );
-    // Cards are translucent, so the line is cut where the middle card reaches it.
-    let covered = if middle.top <= y {
-        (middle.left, middle.left + middle.w)
-    } else {
-        (line.1, line.1)
-    };
-    let rules = [
-        (line.0, line.1.min(covered.0)),
-        (line.0.max(covered.1), line.1),
-    ]
-    .into_iter()
-    .filter(|(a, b)| b > a)
-    .map(|(a, b)| {
+    let label = label_span(&pieces, (0.0, g.stage_w), HEADER_LABEL_MIN_W);
+    let rules = pieces.into_iter().map(|(a, b)| {
         div()
             .absolute()
             .left(px(a))
@@ -1234,9 +1215,7 @@ impl Render for StageView {
             let headers = self
                 .headers
                 .iter()
-                .flat_map(|(key, &span)| {
-                    section_header(&geometry, (key, span), self.pos, self.show.cursor(), &t)
-                })
+                .flat_map(|(key, &span)| section_header(&geometry, (key, span), self.pos, &t))
                 .collect::<Vec<_>>();
             headers.into_iter().chain(ghosts.chain(live)).collect()
         };

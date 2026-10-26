@@ -81,18 +81,32 @@ impl Stage {
     }
 }
 
-/// Where a section's label goes along its line `(left, right)`: the first
-/// piece, left to right, that is on the `visible` stage, not under the card in
-/// the middle (`covered`), and at least `min_w` wide. `None` when no piece is.
-pub fn label_span(
-    line: (f32, f32),
-    covered: (f32, f32),
-    visible: (f32, f32),
-    min_w: f32,
-) -> Option<(f32, f32)> {
-    let (left, right) = (line.0.max(visible.0), line.1.min(visible.1));
-    [(left, right.min(covered.0)), (left.max(covered.1), right)]
+impl Stage {
+    /// The pieces of a section's line for a run of cards at distances
+    /// `first_d..=last_d`, left to right. Each ends at a side card's edge, so
+    /// the middle card belongs to neither, and stays continuous as the strip
+    /// slides. A piece with no width is dropped.
+    pub fn header_pieces(&self, first_d: f32, last_d: f32) -> Vec<(f32, f32)> {
+        let (first, last) = (self.place(first_d, 1.0), self.place(last_d, 1.0));
+        let (prev, next) = (self.place(-1.0, 1.0), self.place(1.0, 1.0));
+        let (start, end) = (first.left, last.left + last.w);
+        [
+            (start, end.min(prev.left + prev.w)),
+            (start.max(next.left), end),
+        ]
         .into_iter()
+        .filter(|(a, b)| b > a)
+        .collect()
+    }
+}
+
+/// Where a section's label goes: the left end of the first of `pieces`, left
+/// to right, that is at least `min_w` wide once clamped to the `visible`
+/// stage. `None` when no piece is.
+pub fn label_span(pieces: &[(f32, f32)], visible: (f32, f32), min_w: f32) -> Option<(f32, f32)> {
+    pieces
+        .iter()
+        .map(|&(a, b)| (a.max(visible.0), b.min(visible.1)))
         .find(|(a, b)| b - a >= min_w)
 }
 
