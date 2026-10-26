@@ -70,6 +70,21 @@ impl Stage {
     }
 }
 
+/// Where a section's label goes along its line `(left, right)`: the first
+/// piece, left to right, that is on the `visible` stage, not under the card in
+/// the middle (`covered`), and at least `min_w` wide. `None` when no piece is.
+pub fn label_span(
+    line: (f32, f32),
+    covered: (f32, f32),
+    visible: (f32, f32),
+    min_w: f32,
+) -> Option<(f32, f32)> {
+    let (left, right) = (line.0.max(visible.0), line.1.min(visible.1));
+    [(left, right.min(covered.0)), (left.max(covered.1), right)]
+        .into_iter()
+        .find(|(a, b)| b - a >= min_w)
+}
+
 /// Exponential smoothing toward `target`, stable under any frame time.
 pub fn ease(pos: f32, target: f32, dt_secs: f32) -> f32 {
     if (target - pos).abs() < SNAP {

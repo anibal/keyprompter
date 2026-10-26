@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::PathBuf,
     time::{Duration, Instant, SystemTime},
 };
@@ -22,13 +23,19 @@ use crate::{
     rundown::{CardId, Edit, Rundown},
     show::{Command, Show, format_elapsed},
     snap::{self, Drag, Edge, Gesture, Lean, Placement, Rect, Side, Stick, Widths},
-    stage::{Stage, ease, slot},
+    stage::{Stage, ease, label_span, slot},
     state::{self, Capture, State},
 };
 
 const COLUMN_W: f32 = 200.0;
 const CARD_VPAD: f32 = 12.0;
 const CARD_PAD: f32 = 10.0;
+const HEADER_GAP: f32 = 4.0;
+const HEADER_LABEL_H: f32 = 14.0;
+const HEADER_LABEL_MIN_W: f32 = 48.0;
+
+/// A section's run of cards: its title, and which run with that title it is.
+type RunKey = (String, usize);
 
 struct Theme {
     bg: Hsla,
@@ -101,6 +108,9 @@ pub struct StageView {
     text_step: i32,
     layouts: Vec<CardLayout>,
     motion: Motion<CardLayout>,
+    /// Where each section header's line ends, in ranks, easing toward its
+    /// cards so the line glides when a card changes section without moving.
+    headers: HashMap<RunKey, (f32, f32)>,
     /// The card a right-click menu is open for.
     menu_target: Option<usize>,
     /// What `layouts` were laid out for. `None` once the deck has changed.
@@ -165,6 +175,7 @@ impl StageView {
             text_step: saved.text.clamp(layout::MIN_STEP, layout::MAX_STEP),
             layouts: Vec::new(),
             motion: Motion::default(),
+            headers: HashMap::new(),
             menu_target: None,
             editing: None,
             layout_key: None,
@@ -253,6 +264,50 @@ impl StageView {
         self.document.as_ref().map_or(&[], |d| &d.deck().slides)
     }
 
+    /// Each titled section's run of cards, with the ranks of its first and
+    /// last card.
+    fn section_runs(&self) -> Vec<(RunKey, (f32, f32))> {
+        let mut runs: Vec<(RunKey, (f32, f32))> = Vec::new();
+        let mut seen: HashMap<&str, usize> = HashMap::new();
+        let mut current = None;
+        for (i, slide) in self.slides().iter().enumerate() {
+            let rank = self.motion.look(slide.id, i).rank;
+            if slide.section_start {
+                current = slide.section.as_deref().map(|title| {
+                    let n = seen.entry(title).or_insert(0);
+                    runs.push(((title.to_string(), *n), (rank, rank)));
+                    *n += 1;
+                    runs.len() - 1
+                });
+            } else if let Some(run) = current {
+                runs[run].1.1 = rank;
+            }
+        }
+        runs
+    }
+
+    /// Eases the header lines toward the section runs. Returns whether any is
+    /// still on its way.
+    fn step_headers(&mut self, dt: f32, slide: bool) -> bool {
+        let mut easing = false;
+        let headers = self
+            .section_runs()
+            .into_iter()
+            .map(|(key, target)| {
+                let eased = match self.headers.get(&key) {
+                    Some(&(first, last)) if slide => {
+                        (ease(first, target.0, dt), ease(last, target.1, dt))
+                    }
+                    _ => target,
+                };
+                easing |= eased != target;
+                (key, eased)
+            })
+            .collect();
+        self.headers = headers;
+        easing
+    }
+
     /// Switches to another rundown, starting it from the first slide.
     pub fn open(
         &mut self,
@@ -265,6 +320,7 @@ impl StageView {
         self.document = Some(Document::new(id, rundown));
         self.show = Show::default();
         self.motion.clear();
+        self.headers.clear();
         self.layouts.clear();
         self.layout_key = None;
         self.error = None;
@@ -816,6 +872,68 @@ fn frame(g: &Geometry, look: &Appearance, t: &Theme) -> Option<(Div, f32, f32)> 
     Some((frame, size, h))
 }
 
+/// The line over a section's cards, with its label above it. `span` is the
+/// ranks of the first and last card.
+fn section_header(
+    g: &Geometry,
+    (key, span): (&RunKey, (f32, f32)),
+    pos: f32,
+    cursor: usize,
+    t: &Theme,
+) -> Vec<AnyElement> {
+    let first = g.stage.place(span.0 - pos, 1.0);
+    let last = g.stage.place(span.1 - pos, 1.0);
+    let line = (first.left, last.left + last.w);
+    if line.1 < 0.0 || line.0 > g.stage_w {
+        return Vec::new();
+    }
+    let y = g.stage.place(1.0, 1.0).top - HEADER_GAP;
+    let middle = g.stage.place(cursor as f32 - pos, 1.0);
+    let label = label_span(
+        line,
+        (middle.left, middle.left + middle.w),
+        (0.0, g.stage_w),
+        HEADER_LABEL_MIN_W,
+    );
+    // Cards are translucent, so the line is cut where the middle card reaches it.
+    let covered = if middle.top <= y {
+        (middle.left, middle.left + middle.w)
+    } else {
+        (line.1, line.1)
+    };
+    let rules = [
+        (line.0, line.1.min(covered.0)),
+        (line.0.max(covered.1), line.1),
+    ]
+    .into_iter()
+    .filter(|(a, b)| b > a)
+    .map(|(a, b)| {
+        div()
+            .absolute()
+            .left(px(a))
+            .top(px(y))
+            .w(px(b - a))
+            .h(px(1.0))
+            .bg(t.dim.opacity(0.4))
+            .into_any_element()
+    });
+    let label = label.map(|(left, right)| {
+        div()
+            .absolute()
+            .left(px(left))
+            .top(px(y - HEADER_LABEL_H))
+            .w(px(right - left))
+            .h(px(HEADER_LABEL_H))
+            .line_height(px(HEADER_LABEL_H))
+            .text_size(px(11.0))
+            .text_color(t.dim)
+            .truncate()
+            .child(key.0.clone())
+            .into_any_element()
+    });
+    rules.chain(label).collect()
+}
+
 /// A card at its slot, or `None` when it is off the strip or invisible.
 fn card(
     g: &Geometry,
@@ -945,7 +1063,8 @@ impl Render for StageView {
             target
         };
         let ids: Vec<_> = self.slides().iter().map(|s| s.id).collect();
-        let moving = self.motion.step(&ids, dt, slide) || self.pos != target;
+        let moving = self.motion.step(&ids, dt, slide);
+        let moving = self.step_headers(dt, slide) || moving || self.pos != target;
         self.last_frame = moving.then_some(now);
         if moving {
             window.request_animation_frame();
@@ -1112,7 +1231,14 @@ impl Render for StageView {
         let cards: Vec<_> = if dragging {
             Vec::new()
         } else {
-            ghosts.chain(live).collect()
+            let headers = self
+                .headers
+                .iter()
+                .flat_map(|(key, &span)| {
+                    section_header(&geometry, (key, span), self.pos, self.show.cursor(), &t)
+                })
+                .collect::<Vec<_>>();
+            headers.into_iter().chain(ghosts.chain(live)).collect()
         };
 
         let slides = self.slides();

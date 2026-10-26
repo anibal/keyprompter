@@ -1,4 +1,4 @@
-use keyprompter::stage::{Stage, ease, slot};
+use keyprompter::stage::{Stage, ease, label_span, slot};
 
 #[test]
 fn hot_spot_is_centered_at_full_size() {
@@ -102,4 +102,50 @@ fn shrink_scales_a_card_around_its_center() {
     let small = STAGE.place(1.0, 0.5);
     assert!((small.w - full.w / 2.0).abs() < 1e-4);
     assert!((small.left + small.w / 2.0 - (full.left + full.w / 2.0)).abs() < 1e-4);
+}
+
+const VISIBLE: (f32, f32) = (0.0, 800.0);
+
+#[test]
+fn a_label_starts_at_the_line_when_nothing_covers_it() {
+    assert_eq!(
+        label_span((100.0, 700.0), (300.0, 500.0), VISIBLE, 40.0),
+        Some((100.0, 300.0))
+    );
+}
+
+#[test]
+fn a_label_is_pinned_to_the_stage_edge_when_the_line_starts_off_screen() {
+    assert_eq!(
+        label_span((-400.0, 250.0), (300.0, 500.0), VISIBLE, 40.0),
+        Some((0.0, 250.0))
+    );
+}
+
+#[test]
+fn a_label_moves_right_of_the_middle_card_when_the_line_starts_under_it() {
+    assert_eq!(
+        label_span((350.0, 700.0), (300.0, 500.0), VISIBLE, 40.0),
+        Some((500.0, 700.0))
+    );
+    assert_eq!(
+        label_span((-200.0, 700.0), (0.0, 500.0), VISIBLE, 40.0),
+        Some((500.0, 700.0))
+    );
+}
+
+#[test]
+fn a_label_is_dropped_when_only_a_sliver_is_left() {
+    assert_eq!(
+        label_span((-400.0, 30.0), (300.0, 500.0), VISIBLE, 40.0),
+        None
+    );
+    assert_eq!(
+        label_span((350.0, 520.0), (300.0, 500.0), VISIBLE, 40.0),
+        None
+    );
+    assert_eq!(
+        label_span((-400.0, -10.0), (300.0, 500.0), VISIBLE, 40.0),
+        None
+    );
 }
