@@ -1,4 +1,4 @@
-use keyprompter::stage::{ease, slot};
+use keyprompter::stage::{Stage, ease, slot};
 
 #[test]
 fn hot_spot_is_centered_at_full_size() {
@@ -64,4 +64,42 @@ fn ease_result_does_not_depend_on_frame_rate() {
     let coarse = ease(0.0, 1.0, 0.1);
     let fine = (0..10).fold(0.0, |p, _| ease(p, 1.0, 0.01));
     assert!((coarse - fine).abs() < 1e-3);
+}
+
+const STAGE: Stage = Stage {
+    hot_x: 500.0,
+    card_w: 300.0,
+    card_h: 130.0,
+    win_h: 150.0,
+};
+
+#[test]
+fn the_middle_card_is_centered_on_the_hot_spot_at_full_size() {
+    let p = STAGE.place(0.0, 1.0);
+    assert_eq!((p.w, p.h, p.size), (300.0, 130.0, 1.0));
+    assert_eq!(p.left + p.w / 2.0, 500.0);
+}
+
+#[test]
+fn a_next_card_sits_right_of_the_middle_one_and_smaller() {
+    let middle = STAGE.place(0.0, 1.0);
+    let next = STAGE.place(1.0, 1.0);
+    assert!(next.left > middle.left + middle.w / 2.0);
+    assert!(next.w < middle.w && next.h < middle.h);
+}
+
+#[test]
+fn cards_are_centered_vertically() {
+    for d in [-2.0, 0.0, 1.5] {
+        let p = STAGE.place(d, 0.9);
+        assert!((p.top + p.h / 2.0 - 75.0).abs() < 1e-4);
+    }
+}
+
+#[test]
+fn shrink_scales_a_card_around_its_center() {
+    let full = STAGE.place(1.0, 1.0);
+    let small = STAGE.place(1.0, 0.5);
+    assert!((small.w - full.w / 2.0).abs() < 1e-4);
+    assert!((small.left + small.w / 2.0 - (full.left + full.w / 2.0)).abs() < 1e-4);
 }

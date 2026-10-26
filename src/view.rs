@@ -22,7 +22,7 @@ use crate::{
     rundown::{CardId, Edit, Rundown},
     show::{Command, Show, format_elapsed},
     snap::{self, Drag, Edge, Gesture, Lean, Placement, Rect, Side, Stick, Widths},
-    stage::{ease, slot},
+    stage::{Stage, ease, slot},
     state::{self, Capture, State},
 };
 
@@ -764,11 +764,8 @@ fn wall_clock() -> String {
 
 /// Where cards go on the strip and how big their text is.
 struct Geometry {
-    hot_x: f32,
+    stage: Stage,
     stage_w: f32,
-    card_w: f32,
-    card_h: f32,
-    win_h: f32,
     scale: TypeScale,
     content_h: f32,
 }
@@ -790,18 +787,16 @@ struct Appearance {
 /// size it is drawn at and its height, or `None` when it is off the strip or
 /// invisible.
 fn frame(g: &Geometry, look: &Appearance, t: &Theme) -> Option<(Div, f32, f32)> {
-    let s = slot(look.d);
-    let size = s.scale * look.shrink;
-    let opacity = s.opacity * look.opacity;
-    let (w, h) = (g.card_w * size, g.card_h * size);
-    let center = g.hot_x + s.x * g.card_w;
-    if opacity <= 0.0 || center + w / 2.0 < 0.0 || center - w / 2.0 > g.stage_w {
+    let opacity = slot(look.d).opacity * look.opacity;
+    let p = g.stage.place(look.d, look.shrink);
+    let (w, h, size) = (p.w, p.h, p.size);
+    if opacity <= 0.0 || p.left + w < 0.0 || p.left > g.stage_w {
         return None;
     }
     let frame = div()
         .absolute()
-        .left(px(center - w / 2.0))
-        .top(px((g.win_h - h) / 2.0))
+        .left(px(p.left))
+        .top(px(p.top))
         .w(px(w))
         .h(px(h))
         .p(px(CARD_PAD * size))
@@ -1032,11 +1027,13 @@ impl Render for StageView {
         }
 
         let geometry = Geometry {
-            hot_x,
+            stage: Stage {
+                hot_x,
+                card_w,
+                card_h,
+                win_h,
+            },
             stage_w,
-            card_w,
-            card_h,
-            win_h,
             scale,
             content_h,
         };
