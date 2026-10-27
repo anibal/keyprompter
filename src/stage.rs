@@ -32,6 +32,85 @@ pub fn slot(d: f32) -> Slot {
     }
 }
 
+/// The middle card's outline, drawn inside its frame (`border_2` in the view).
+pub const CARD_BORDER: f32 = 2.0;
+
+/// The strip's measurements, for placing a card at a distance from the hot spot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Stage {
+    /// Center of the hot spot, from the stage's left edge.
+    pub hot_x: f32,
+    /// Width of a full-size card.
+    pub card_w: f32,
+    pub card_h: f32,
+    pub win_h: f32,
+}
+
+/// Where a card sits on the stage and how large it is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Placement {
+    pub left: f32,
+    pub top: f32,
+    pub w: f32,
+    pub h: f32,
+    /// The card's size relative to a full-size one.
+    pub size: f32,
+}
+
+impl Stage {
+    /// Top of the card in the hot spot.
+    pub fn mid_top(&self) -> f32 {
+        (self.win_h - self.card_h) / 2.0
+    }
+
+    /// The top every side card hangs from: an upcoming card's bottom meets
+    /// the inside of the middle card's outline, so no card looks lower than it.
+    pub fn hang_top(&self) -> f32 {
+        self.mid_top() + self.card_h * (1.0 - slot(1.0).scale) - CARD_BORDER
+    }
+
+    /// The card at distance `d` from the hot spot, scaled further by `shrink`.
+    pub fn place(&self, d: f32, shrink: f32) -> Placement {
+        let s = slot(d);
+        let size = s.scale * shrink;
+        let (w, h) = (self.card_w * size, self.card_h * size);
+        Placement {
+            left: self.hot_x + s.x * self.card_w - w / 2.0,
+            top: lerp(self.mid_top(), self.hang_top(), d.abs()),
+            w,
+            h,
+            size,
+        }
+    }
+
+    /// The pieces of a section's line for a run of cards at distances
+    /// `first_d..=last_d`, left to right. Each ends at a side card's edge, so
+    /// the middle card belongs to neither, and stays continuous as the strip
+    /// slides. A piece with no width is dropped.
+    pub fn header_pieces(&self, first_d: f32, last_d: f32) -> Vec<(f32, f32)> {
+        let (first, last) = (self.place(first_d, 1.0), self.place(last_d, 1.0));
+        let (prev, next) = (self.place(-1.0, 1.0), self.place(1.0, 1.0));
+        let (start, end) = (first.left, last.left + last.w);
+        [
+            (start, end.min(prev.left + prev.w)),
+            (start.max(next.left), end),
+        ]
+        .into_iter()
+        .filter(|(a, b)| b > a)
+        .collect()
+    }
+}
+
+/// Where a section's label goes: the left end of the first of `pieces`, left
+/// to right, that is at least `min_w` wide once clamped to the `visible`
+/// stage. `None` when no piece is.
+pub fn label_span(pieces: &[(f32, f32)], visible: (f32, f32), min_w: f32) -> Option<(f32, f32)> {
+    pieces
+        .iter()
+        .map(|&(a, b)| (a.max(visible.0), b.min(visible.1)))
+        .find(|(a, b)| b - a >= min_w)
+}
+
 /// Exponential smoothing toward `target`, stable under any frame time.
 pub fn ease(pos: f32, target: f32, dt_secs: f32) -> f32 {
     if (target - pos).abs() < SNAP {

@@ -112,9 +112,10 @@ impl Rundown {
                 .sections
                 .iter()
                 .flat_map(|section| {
-                    section.cards.iter().map(|card| Slide {
+                    section.cards.iter().enumerate().map(|(i, card)| Slide {
                         id: card.id,
                         section: section.title.clone(),
+                        section_start: i == 0,
                         cue: card.cue.clone(),
                         body: deck::parse_body(&card.body),
                     })

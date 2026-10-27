@@ -9,6 +9,8 @@ pub struct Deck {
 pub struct Slide {
     pub id: CardId,
     pub section: Option<String>,
+    /// The first card of its section, even when the previous one has the same title.
+    pub section_start: bool,
     pub cue: String,
     pub body: Vec<Block>,
 }

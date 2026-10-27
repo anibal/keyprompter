@@ -1,6 +1,6 @@
 # KeyPrompter
 
-A cue strip for streaming. It shows "mini slides" at the top of the screen, near the webcam. The current slide sits under the webcam, at the screen's center, as far as the strip reaches. Upcoming slides wait on the right, and past slides shrink into a trail on the left.
+A cue strip for streaming. It shows "mini slides" at the top of the screen, near the webcam. The current slide sits under the webcam, at the screen's center, as far as the strip reaches. Upcoming slides wait on the right, and past slides shrink into a trail on the left. Over the cards of each titled section a dim label and a line carry the section's name, and the line moves with the cards.
 
 ## Run
 
@@ -42,7 +42,7 @@ The strip is hidden from screenshots, screen sharing and recordings by default. 
 ## Rundown format
 
 ```markdown
-# Section name        (shown in the left column, not a slide)
+# Section name        (not a slide; shown in the left column and over its cards on the strip)
 
 ## Slide cue          (the big line on the card)
 - a bullet with **bold**, *italic* and `code`

@@ -26,6 +26,13 @@ fn section_carries_forward_and_is_not_a_slide() {
 }
 
 #[test]
+fn the_first_card_of_each_section_starts_it_even_with_a_repeated_title() {
+    let deck = parse("## orphan\n## orphan too\n# A\n## one\n## two\n# A\n## three\n");
+    let starts: Vec<_> = deck.slides.iter().map(|s| s.section_start).collect();
+    assert_eq!(starts, [true, false, true, false, true]);
+}
+
+#[test]
 fn slide_before_any_section_has_none() {
     let deck = parse("## orphan\n# Later\n## kept\n");
     assert_eq!(deck.slides[0].section, None);
