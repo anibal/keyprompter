@@ -32,6 +32,9 @@ pub fn slot(d: f32) -> Slot {
     }
 }
 
+/// The middle card's outline, drawn inside its frame (`border_2` in the view).
+pub const CARD_BORDER: f32 = 2.0;
+
 /// The strip's measurements, for placing a card at a distance from the hot spot.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Stage {
@@ -60,10 +63,10 @@ impl Stage {
         (self.win_h - self.card_h) / 2.0
     }
 
-    /// The top every side card hangs from: low enough that an upcoming
-    /// card's bottom meets the middle card's.
+    /// The top every side card hangs from: an upcoming card's bottom meets
+    /// the inside of the middle card's outline, so no card looks lower than it.
     pub fn hang_top(&self) -> f32 {
-        self.mid_top() + self.card_h * (1.0 - slot(1.0).scale)
+        self.mid_top() + self.card_h * (1.0 - slot(1.0).scale) - CARD_BORDER
     }
 
     /// The card at distance `d` from the hot spot, scaled further by `shrink`.
@@ -79,9 +82,7 @@ impl Stage {
             size,
         }
     }
-}
 
-impl Stage {
     /// The pieces of a section's line for a run of cards at distances
     /// `first_d..=last_d`, left to right. Each ends at a side card's edge, so
     /// the middle card belongs to neither, and stays continuous as the strip

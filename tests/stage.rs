@@ -1,4 +1,4 @@
-use keyprompter::stage::{Stage, ease, label_span, slot};
+use keyprompter::stage::{CARD_BORDER, Stage, ease, label_span, slot};
 
 #[test]
 fn hot_spot_is_centered_at_full_size() {
@@ -95,13 +95,28 @@ fn side_cards_on_both_sides_hang_from_one_top() {
     for d in [-3.0, -1.0, 1.0, 2.5] {
         assert_eq!(STAGE.place(d, 1.0).top, hang);
     }
-    assert!((hang - (10.0 + 130.0 * 0.2)).abs() < 1e-4);
+    assert!((hang - (10.0 + 130.0 * 0.2 - CARD_BORDER)).abs() < 1e-4);
 }
 
 #[test]
-fn an_upcoming_card_ends_where_the_middle_card_ends() {
+fn an_upcoming_card_ends_inside_the_middle_cards_outline() {
     let (mid, next) = (STAGE.place(0.0, 1.0), STAGE.place(1.0, 1.0));
-    assert!((next.top + next.h - (mid.top + mid.h)).abs() < 1e-4);
+    assert!((next.top + next.h - (mid.top + mid.h - CARD_BORDER)).abs() < 1e-4);
+}
+
+#[test]
+fn no_card_reaches_below_the_middle_card() {
+    let bottom = STAGE.place(0.0, 1.0);
+    let bottom = bottom.top + bottom.h;
+    let mut d = -4.0_f32;
+    while d < 4.0 {
+        let p = STAGE.place(d, 1.0);
+        assert!(
+            p.top + p.h <= bottom + 1e-4,
+            "card at d={d} ends below the middle"
+        );
+        d += 0.01;
+    }
 }
 
 #[test]

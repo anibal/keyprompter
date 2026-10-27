@@ -30,7 +30,7 @@ use crate::{
 const COLUMN_W: f32 = 200.0;
 const CARD_VPAD: f32 = 12.0;
 const CARD_PAD: f32 = 10.0;
-const RAIL_GAP: f32 = 18.0;
+const RAIL_GAP: f32 = 16.0;
 const HEADER_LABEL_H: f32 = 14.0;
 const HEADER_LABEL_MIN_W: f32 = 48.0;
 
